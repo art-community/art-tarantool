@@ -45,7 +45,7 @@ local box = {
         tuple[2] = box.tuple.new(data[2])
         local schema_hash = art.core.hash({ tuple[2], bucket_id})
         tuple[1] = tuple[1]:update({{'!', #tuple[1]+1, schema_hash}})
-        box.space[space]:insert(tuple[1])
+        tuple[1] = box.space[space]:insert(tuple[1])
 
         local schema_tuple = box.tuple.new({schema_hash, 1, tuple[2], bucket_id})
         art.core.schemaOf(space):upsert(schema_tuple, { { '+', 'count', 1}})
