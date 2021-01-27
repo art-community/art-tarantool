@@ -152,7 +152,7 @@ local mapping = {
                     table.remove(v, 1) --to get primary key from update record
                     space:delete(v)
                 else
-                    space:replace(v[3])
+                    space:put(v[3])
                 end
             end
             box.space._mapping_pending_updates:delete(batch[1])
