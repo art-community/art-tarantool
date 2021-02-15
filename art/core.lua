@@ -44,6 +44,7 @@ local core = {
     end,
 
     removeBucket = function(space, data)
+        if not(data) then return end
         local dataTuple = box.tuple.new(data[1]):update({{'#', box.space[space].index.bucket_id.parts[1].fieldno, 1}})
         return {dataTuple, data[2]}
     end,
