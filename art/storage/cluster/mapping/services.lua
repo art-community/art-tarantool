@@ -15,6 +15,11 @@ local services = {
 
         watchdog = function()
             while true do
+                for space, fiber in pairs(art.cluster.mapping.builder.serviceFibers) do
+                    if (art.core.fiber.status(fiber) == 'dead') then
+                        table.insert(art.cluster.mapping.builder.pendingSpaces, space)
+                    end
+                end
                 for k,space in pairs(art.cluster.mapping.builder.pendingSpaces) do
                     art.cluster.mapping.builder.serviceFibers[space] = art.core.fiber.create(art.cluster.mapping.builder.service, space)
                     art.cluster.mapping.builder.pendingSpaces[k] = nil
@@ -93,20 +98,20 @@ local services = {
             end
         end,
 
-        collectUpdates = function(watched_space)
-            if not (art.cluster.mapping.lastCollectedTimestamps[watched_space.space]) then
-                art.cluster.mapping.lastCollectedTimestamps[watched_space.space] = art.cluster.mapping.lastUploadMinTimestamp
+        collectUpdates = function(watchedSpace)
+            if not (art.cluster.mapping.lastCollectedTimestamps[watchedSpace.space]) then
+                art.cluster.mapping.lastCollectedTimestamps[watchedSpace.space] = art.cluster.mapping.lastUploadMinTimestamp
             end
 
             local batch = {}
-            for _,v in art.core.mappingUpdatesOf(watched_space.space).index.timestamp:pairs(
-                    art.cluster.mapping.lastCollectedTimestamps[watched_space.space], 'GT') do
+            for _,v in art.core.mappingUpdatesOf(watchedSpace.space).index.timestamp:pairs(
+                    art.cluster.mapping.lastCollectedTimestamps[watchedSpace.space], 'GT') do
                 table.insert(batch, v)
-                if #batch == watched_space.batchSize then break end
+                if #batch == watchedSpace.batchSize then break end
             end
 
             if batch[1] then
-                art.cluster.mapping.lastCollectedTimestamps[watched_space.space] = batch[#batch][1]
+                art.cluster.mapping.lastCollectedTimestamps[watchedSpace.space] = batch[#batch][1]
                 return batch
             end
         end,
