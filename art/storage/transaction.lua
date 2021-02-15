@@ -1,4 +1,4 @@
---transaction request format: {string function, {arg1, ... argN} }
+--transaction request format: list of {string function, {arg1, ... argN} }
 --arg format: {arg} or {dependency:{prev_response_index}} or {dependency:{prev_response_index, fieldname}}
 
 local transaction = {

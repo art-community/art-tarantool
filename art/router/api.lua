@@ -98,51 +98,51 @@ local api = {
         end
     },
 
-    transaction = function(requests)
-        return unpack(art.transaction.execute(requests))
+    transaction = function(requests, bucket_id)
+        return unpack(art.transaction.execute(requests, bucket_id))
     end,
 
     get = function(space, key, index)
-        local bucket_id = art.core.bucketFromKey(space, key)
+        local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
         return vshard.router.callro(bucket_id, 'art.api.get', {space, key, index})
     end,
 
     delete = function(space, key)
-        local bucket_id = art.core.bucketFromKey(space, key)
+        local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
         return vshard.router.callrw(bucket_id, 'art.api.delete', {space, key})
     end,
 
-    insert = function(space, data)
-        local bucket_id = art.core.bucketFromData(space, data)
-        return vshard.router.callrw(bucket_id, 'art.api.insert', {space, data})
+    insert = function(space, data, bucket_id)
+        local response = vshard.router.callrw(bucket_id, 'art.api.insert', {space, art.core.insertBucket(space, data, bucket_id)})
+        return art.core.removeBucket(space, response)
     end,
 
-    autoIncrement = function(space, data)
-        local bucket_id = art.core.bucketFromData(space, data)
-        return vshard.router.callrw(bucket_id, 'art.api.autoIncrement', {space, data})
+    autoIncrement = function(space, data, bucket_id)
+        local response = vshard.router.callrw(bucket_id, 'art.api.autoIncrement', {space, art.core.insertBucket(space, data, bucket_id)})
+        return art.core.removeBucket(space, response)
     end,
 
-    put = function(space, data)
-        local bucket_id = art.core.bucketFromData(space, data)
-        return vshard.router.callrw(bucket_id, 'art.api.put', {space, data})
+    put = function(space, data, bucket_id)
+        local response = vshard.router.callrw(bucket_id, 'art.api.put', {space, art.core.insertBucket(space, data, bucket_id)})
+        return art.core.removeBucket(space, response)
     end,
 
     update = function(space, key, commands)
-        local bucket_id = art.core.bucketFromKey(space, key)
+        local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
         return vshard.router.callrw(bucket_id, 'art.api.update', {space, key, commands})
     end,
 
-    replace = function(space, data)
-        local bucket_id = art.core.bucketFromData(space, data)
-        return vshard.router.callrw(bucket_id, 'art.api.replace', {space, data})
+    replace = function(space, data, bucket_id)
+        local response = vshard.router.callrw(bucket_id, 'art.api.replace', {space, art.core.insertBucket(space, data, bucket_id)})
+        return art.core.removeBucket(space, response)
     end,
 
-    upsert = function(space, data, commands)
-        local bucket_id = art.core.bucketFromData(space, data)
-        return vshard.router.callrw(bucket_id, 'art.api.upsert', {space, data, commands})
+    upsert = function(space, data, bucket_id, commands)
+        local response = vshard.router.callrw(bucket_id, 'art.api.upsert', {space, art.core.insertBucket(space, data, bucket_id), commands})
+        return art.core.removeBucket(space, response)
     end,
 
     select = function(space, request, index, ...)

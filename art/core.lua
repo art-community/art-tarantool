@@ -28,9 +28,9 @@ local core = {
         return loadstring('return ' .. string)()
     end,
 
-    atomic = function(functionObject, ...)
-        if box.is_in_txn() then return functionObject(...) end
-        return box.atomic(functionObject, ...)
+    atomic = function(func, ...)
+        if box.is_in_txn() then return func(...) end
+        return box.atomic(func, ...)
     end,
 
     bucketFromData = function(space, data)
@@ -38,7 +38,17 @@ local core = {
         return data[1][ box.space[space].index.bucket_id.parts[1].fieldno ]
     end,
 
-    bucketFromKey = function(space, key)
+    insertBucket = function(space, data, bucket_id)
+        local dataTuple = box.tuple.new(data[1]):update({{'!', box.space[space].index.bucket_id.parts[1].fieldno, bucket_id}})
+        return {dataTuple, data[2]}
+    end,
+
+    removeBucket = function(space, data)
+        local dataTuple = box.tuple.new(data[1]):update({{'#', box.space[space].index.bucket_id.parts[1].fieldno, 1}})
+        return {dataTuple, data[2]}
+    end,
+
+    mapBucket = function(space, key)
         local mapping_entry = box.space[space]:get(key)
         if not (mapping_entry) then return end
         return mapping_entry.bucket_id

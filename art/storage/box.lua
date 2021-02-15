@@ -132,7 +132,7 @@ local box = {
 
         waitForClusterOperation = function()
             while art.box.space.activeClusterOperation do
-                art.core.fiber.sleep(0.5)
+                art.core.fiber.sleep(0.1)
             end
         end,
 

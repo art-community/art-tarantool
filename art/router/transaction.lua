@@ -1,15 +1,14 @@
 --transaction request format: {string function, {arg1, ... argN} }
 --arg format: {arg} or {dependency:{prev_response_index}} or {dependency:{prev_response_index, fieldname}}
---bucket mapping:
--- null means 'impossible to get bucket from provided operation, next'
--- >0 means 'got bucket, let`s try'
+
 
 local transaction = {
-    execute = function(transaction)
+    execute = function(transaction, bucket_id)
+        if not(bucket_id) then return false, 'Missing bucketId' end
         if not(art.transaction.isSafe(transaction)) then return false, 'Transaction contains unsafe operations for sharded cluster' end
-        local bucket_id = art.transaction.mapBucket(transaction)
-        if not(bucket_id) then return false, 'Failed to get bucket_id for transaction operations' end
-        return vshard.router.callrw(bucket_id, 'art.transaction.execute', {transaction})
+        if not checkBuckets(transaction) then return false, 'Transaction should be bucket-local' end
+        transaction = art.transaction.insertBuckets(transaction)
+        return vshard.router.callrw(bucket_id, 'art.transaction.execute', {transaction, bucket_id})
     end,
 
     isSafe = function(transaction)
@@ -20,49 +19,92 @@ local transaction = {
         return true
     end,
 
-    mapBucket = function(transaction)
-        local bucket
-        local result
+    insertBuckets = function(transaction)
+        local results = {}
         for _, operation in pairs(transaction) do
-            bucket = art.transaction.bucketMappers[operation[1]](operation[2])
-            if (bucket) then
-                if not(result == nil) and not(bucket == result) then return end
-                result = bucket
-            end
+            local updatedArgs = art.transaction.bucketInserters[operation[1]](operation[2])
+            table.insert(results, {operation[1], updatedArgs})
         end
-        return result
+        return results
     end,
 
-    bucketMappers = {},
+    checkBuckets = function(transaction)
+        local bucket = -1
+        for _, operation in pairs(transaction) do
+            local current = art.transaction.bucketGetters[operation[1]](operation[2])
+            if (bucket == -1) then bucket = current end
+            if not (current == bucket) then return false end
+        end
+        if (bucket == -1) then return false end
+        return true
+    end,
+
+    bucketInserters = {},
+
+    bucketGetters = {},
 }
 
-local mappers = {}
 
-local function mapFromKey(args)
-    if not(args[2].dependency) then return art.core.bucketFromKey(args[1], args[2]) end
+
+local inserters = {}
+
+local function insertBucket(args)
+    if (args[2].dependency) then return args end
+    args[2] = art.core.insertBucket(args[1], args[2], args[3])
+    return args
 end
 
-local function mapFromData(args)
-    if not(args[2].dependency) then return art.core.bucketFromData(args[1], args[2]) end
+local function identity(args)
+    return args
 end
 
-local function noMap()
-    return nil
+inserters['art.api.space.list'] = identity
+inserters['art.api.space.listIndices'] = identity
+
+inserters['art.api.get'] = identity
+inserters['art.api.delete'] = identity
+inserters['art.api.update'] = identity
+
+inserters['art.api.insert'] = insertBucket
+inserters['art.api.put'] = insertBucket
+inserters['art.api.autoIncrement'] = insertBucket
+inserters['art.api.replace'] = insertBucket
+inserters['art.api.upsert'] = insertBucket
+
+transaction.bucketInserters = inserters
+
+
+
+
+local getters = {}
+
+local function fromKey(args)
+    if not(args[2].dependency) then return -1 end
+    return art.core.mapBucket(args[1], args[2])
 end
 
-mappers['art.api.space.list'] = noMap
-mappers['art.api.space.listIndices'] = noMap
+local function fromData(args)
+    if (args[3].dependency) then return -1 end
+    return args[3]
+end
 
-mappers['art.api.get'] = mapFromKey
-mappers['art.api.delete'] = mapFromKey
-mappers['art.api.update'] = mapFromKey
+local function empty()
+    return -1
+end
 
-mappers['art.api.insert'] = mapFromData
-mappers['art.api.put'] = mapFromData
-mappers['art.api.autoIncrement'] = mapFromData
-mappers['art.api.replace'] = mapFromData
-mappers['art.api.upsert'] = mapFromData
+inserters['art.api.space.list'] = empty
+inserters['art.api.space.listIndices'] = empty
 
-transaction.bucketMappers = mappers
+inserters['art.api.get'] = fromKey
+inserters['art.api.delete'] = fromKey
+inserters['art.api.update'] = fromKey
+
+inserters['art.api.insert'] = fromData
+inserters['art.api.put'] = fromData
+inserters['art.api.autoIncrement'] = fromData
+inserters['art.api.replace'] = fromData
+inserters['art.api.upsert'] = fromData
+
+transaction.bucketGetters = getters
 
 return transaction
