@@ -2,7 +2,7 @@ local box = {
     get = function(space, key, index)
         if not(index) then index = 0 end
         local data = box.space[space].index[index]:get(key)
-        if (data == nil) then return {'', ''} end
+        if (data == nil) then return {{}} end
         local schema_hash = data[#data]
         local response = data:transform(#data, 1)
         local response_schema = art.core.schemaOf(space):get(schema_hash)['schema']
@@ -19,7 +19,7 @@ local box = {
 
     delete = function(space, key)
         local data = box.space[space]:get(key)
-        if data == nil then return {'', ''} end
+        if data == nil then return {{}} end
         local schema_hash = data[#data]
         local response = data:transform(#data, 1)
 
