@@ -103,7 +103,10 @@ inserters['art.api.insert'] = fromData
 inserters['art.api.put'] = fromData
 inserters['art.api.autoIncrement'] = fromData
 inserters['art.api.replace'] = fromData
-inserters['art.api.upsert'] = fromData
+inserters['art.api.upsert'] = function(args)
+    if (args[4].dependency) then return -1 end
+    return args[4]
+end
 
 transaction.bucketGetters = getters
 
