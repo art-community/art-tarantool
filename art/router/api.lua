@@ -105,13 +105,13 @@ local api = {
     get = function(space, key, index)
         local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
-        return vshard.router.callro(bucket_id, 'art.api.get', {space, key, index})
+        return art.core.removeBucket(space, vshard.router.callro(bucket_id, 'art.api.get', {space, key, index}))
     end,
 
     delete = function(space, key)
         local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
-        return vshard.router.callrw(bucket_id, 'art.api.delete', {space, key})
+        return art.core.removeBucket(space, vshard.router.callrw(bucket_id, 'art.api.delete', {space, key}))
     end,
 
     insert = function(space, data, bucket_id)
@@ -132,7 +132,7 @@ local api = {
     update = function(space, key, commands)
         local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
-        return vshard.router.callrw(bucket_id, 'art.api.update', {space, key, commands})
+        return art.core.removeBucket(vshard.router.callrw(bucket_id, 'art.api.update', {space, key, commands}))
     end,
 
     replace = function(space, data, bucket_id)
@@ -167,7 +167,7 @@ local api = {
 
         for bucket_id, batch_req in pairs(get_requests) do
             local response = vshard.router.callro(bucket_id, 'art.api.getBatch', {space, batch_req})
-            if (response) then for _,v in pairs(response) do table.insert(result, v) end end
+            if (response) then for _,v in pairs(response) do table.insert(result, art.core.removeBucket(space, v)) end end
         end
         if not (result[1]) then return {} end
         return result
