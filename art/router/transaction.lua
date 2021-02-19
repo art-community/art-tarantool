@@ -53,10 +53,7 @@ end
 inserters['art.api.get'] = identity
 inserters['art.api.delete'] = identity
 inserters['art.api.update'] = function(args)
-    local fieldno = box.space[args[1]].index.bucket_id.parts[1].fieldno
-    for k, command in pairs(args[3]) do
-        if command[2] >= fieldno then args[3][k][2] = command[2] + 1 end
-    end
+    args[3] = art.core.correctUpdateOperations(args[1], args[3])
     return args
 end
 
@@ -66,10 +63,7 @@ inserters['art.api.autoIncrement'] = insertBucket
 inserters['art.api.replace'] = insertBucket
 inserters['art.api.upsert'] = function(args)
     args = insertBucket(args)
-    local fieldno = box.space[args[1]].index.bucket_id.parts[1].fieldno
-    for index, command in pairs(args[3]) do
-        if command[2] >= fieldno then args[3][index][2] = command[2] + 1 end
-    end
+    args[3] = art.core.correctUpdateOperations(args[1], args[3])
     return args
 end
 

@@ -54,6 +54,14 @@ local core = {
         local mapping_entry = box.space[space]:get(key)
         if not (mapping_entry) then return end
         return mapping_entry.bucket_id
+    end,
+
+    correctUpdateOperations = function(space, operations)
+        local fieldno = box.space[space].index.bucket_id.parts[1].fieldno
+        for index, command in pairs(operations[1]) do
+            if command[2] >= fieldno then operations[1][index][2] = command[2] + 1 end
+        end
+        return operations
     end
 }
 

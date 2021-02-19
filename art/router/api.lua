@@ -132,26 +132,18 @@ local api = {
     update = function(space, key, commands)
         local bucket_id = art.core.mapBucket(space, key)
         if not(bucket_id) then return {{}} end
-        local fieldno = box.space[space].index.bucket_id.parts[1].fieldno
-        for k, command in pairs(commands[1]) do
-            if command[2] >= fieldno then command[2] = command[2] + 1 end
-        end
+        art.core.correctUpdateOperations(space, commands)
         return art.core.removeBucket(vshard.router.callrw(bucket_id, 'art.api.update', {space, key, commands}))
     end,
 
-
+    upsert = function(space, data, commands, bucket_id)
+        art.core.correctUpdateOperations(space, commands)
+        return art.core.removeBucket(space, vshard.router.callrw(bucket_id, 'art.api.upsert', {space, art.core.insertBucket(space, data, bucket_id), commands}))
+    end,
 
     replace = function(space, data, bucket_id)
         local response = vshard.router.callrw(bucket_id, 'art.api.replace', {space, art.core.insertBucket(space, data, bucket_id)})
         return art.core.removeBucket(space, response)
-    end,
-
-    upsert = function(space, data, commands, bucket_id)
-        local fieldno = box.space[space].index.bucket_id.parts[1].fieldno
-        for k, command in pairs(commands[1]) do
-            if command[2] >= fieldno then command[2] = command[2] + 1 end
-        end
-        return art.core.removeBucket(space, vshard.router.callrw(bucket_id, 'art.api.upsert', {space, art.core.insertBucket(space, data, bucket_id), commands}))
     end,
 
     select = function(space, request, index, ...)
