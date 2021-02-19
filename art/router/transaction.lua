@@ -4,13 +4,12 @@
 
 local transaction = {
     execute = function(transaction, bucket_id)
-        req = {transaction, bucket_id}
         if not(bucket_id) then return false, 'Missing bucketId' end
         if not(art.transaction.isSafe(transaction)) then return false, 'Transaction contains unsafe operations for sharded cluster' end
         transaction = art.transaction.insertBuckets(transaction)
-        local results = vshard.router.callrw(bucket_id, 'art.transaction.execute', {transaction})
-        art.transaction.removeBuckets(transaction, results)
-        return results
+        local response = vshard.router.callrw(bucket_id, 'art.transaction.execute', { transaction})
+        if response[1] then art.transaction.removeBuckets(transaction, response) end
+        return response
     end,
 
     isSafe = function(transaction)
@@ -30,9 +29,9 @@ local transaction = {
         return results
     end,
 
-    removeBuckets = function(transaction, results)
-        for index, result in pairs(results) do
-            result = art.core.removeBucket(transaction[index][2][1], result)
+    removeBuckets = function(transaction, response)
+        for index, tuple in pairs(response[2]) do
+            response[2][index] = {art.core.removeBucket(transaction[index][2][1], tuple[1])}
         end
     end,
 
@@ -53,13 +52,26 @@ end
 
 inserters['art.api.get'] = identity
 inserters['art.api.delete'] = identity
-inserters['art.api.update'] = identity
+inserters['art.api.update'] = function(args)
+    local fieldno = box.space[args[1]].index.bucket_id.parts[1].fieldno
+    for k, command in pairs(args[3]) do
+        if command[2] >= fieldno then args[3][k][2] = command[2] + 1 end
+    end
+    return args
+end
 
 inserters['art.api.insert'] = insertBucket
 inserters['art.api.put'] = insertBucket
 inserters['art.api.autoIncrement'] = insertBucket
 inserters['art.api.replace'] = insertBucket
-inserters['art.api.upsert'] = insertBucket
+inserters['art.api.upsert'] = function(args)
+    args = insertBucket(args)
+    local fieldno = box.space[args[1]].index.bucket_id.parts[1].fieldno
+    for index, command in pairs(args[3]) do
+        if command[2] >= fieldno then args[3][index][2] = command[2] + 1 end
+    end
+    return args
+end
 
 transaction.bucketInserters = inserters
 
