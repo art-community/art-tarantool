@@ -90,8 +90,7 @@ local box = {
         local bucket_id = data.bucket_id
         data[1] = data[1]:update(commands[1])
         data[2] = box.tuple.new(data[2]):update(commands[2]):totable()
-        art.box.put(space, data, bucket_id)
-        return data
+        return art.box.put(space, data, bucket_id)
     end,
 
     replace = function(space, data)
