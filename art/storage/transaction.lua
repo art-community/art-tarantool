@@ -24,7 +24,7 @@ local transaction = {
         local result = {}
         for index, argument in pairs(args) do
             result[index] = argument
-            if argument.dependency then result[index] = art.transaction.getDependency(argument.dependency, prevResults) end
+            if type(argument)=='table' and argument.dependency then result[index] = art.transaction.getDependency(argument.dependency, prevResults) end
         end
         return result
     end,

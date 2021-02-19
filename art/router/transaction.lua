@@ -6,7 +6,7 @@ local transaction = {
     execute = function(transaction, bucket_id)
         if not(bucket_id) then return false, 'Missing bucketId' end
         if not(art.transaction.isSafe(transaction)) then return false, 'Transaction contains unsafe operations for sharded cluster' end
-        if not checkBuckets(transaction) then return false, 'Transaction should be bucket-local' end
+        if not art.transaction.checkBuckets(transaction) then return false, 'Transaction should be bucket-local' end
         transaction = art.transaction.insertBuckets(transaction)
         return vshard.router.callrw(bucket_id, 'art.transaction.execute', {transaction, bucket_id})
     end,
@@ -92,18 +92,18 @@ local function empty()
     return -1
 end
 
-inserters['art.api.space.list'] = empty
-inserters['art.api.space.listIndices'] = empty
+getters['art.api.space.list'] = empty
+getters['art.api.space.listIndices'] = empty
 
-inserters['art.api.get'] = fromKey
-inserters['art.api.delete'] = fromKey
-inserters['art.api.update'] = fromKey
+getters['art.api.get'] = fromKey
+getters['art.api.delete'] = fromKey
+getters['art.api.update'] = fromKey
 
-inserters['art.api.insert'] = fromData
-inserters['art.api.put'] = fromData
-inserters['art.api.autoIncrement'] = fromData
-inserters['art.api.replace'] = fromData
-inserters['art.api.upsert'] = function(args)
+getters['art.api.insert'] = fromData
+getters['art.api.put'] = fromData
+getters['art.api.autoIncrement'] = fromData
+getters['art.api.replace'] = fromData
+getters['art.api.upsert'] = function(args)
     if (args[4].dependency) then return -1 end
     return args[4]
 end
