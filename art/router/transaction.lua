@@ -79,7 +79,7 @@ transaction.bucketInserters = inserters
 local getters = {}
 
 local function fromKey(args)
-    if not(type(args[2]) == 'table' and args[2].dependency) then return -1 end
+    if (type(args[2]) == 'table' and args[2].dependency) then return -1 end
     return art.core.mapBucket(args[1], args[2])
 end
 
