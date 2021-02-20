@@ -111,16 +111,21 @@ local box = {
         end
     end,
 
-    select = function(space, request, index, ...)
+    select = function(space, request, index, iter, stream)
         if not (index) then index = 0 end
-        local response_entry = {}
-        local result = {}
-        local response = box.space[space].index[index]:select(request, ...)
+        if not (iter) then iter = 'EQ' end
+        if not (stream) then stream = {} end
+
+        local gen, param, state = box.space[space].index[index]:pairs(request, {iterator = iter})
+        for _, operation in pairs(stream) do
+            gen, param, state = art.core.stream[operation[1]](gen, param, state, operation[2])
+        end
+        local response = art.core.stream.collect(gen, param, state)
         if response[1] == nil then return {} end
+
+        local result = {}
         for _,entry in pairs(response) do
-            response_entry[1] = entry:transform(#entry, 1)
-            response_entry[2] = art.core.schemaOf(space):get(entry[#entry]).schema
-            table.insert(result, response_entry)
+            table.insert(result, {entry:transform(#entry, 1), art.core.schemaOf(space):get(entry[#entry]).schema})
         end
         return result
     end,
