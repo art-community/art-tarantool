@@ -35,20 +35,25 @@ local core = {
 
     functional = require('fun'),
 
+    bucketFieldNumber = function(space)
+        if not(box.space[space]) or not(box.space[space].index.bucket_id) then return end
+        return box.space[space].index.bucket_id.parts[1].fieldno
+    end,
+
     bucketFromData = function(space, data)
         if not(box.space[space].index.bucket_id) then return end
-        return data[1][ box.space[space].index.bucket_id.parts[1].fieldno ]
+        return data[1][ art.core.bucketFieldNumber(space) ]
     end,
 
     insertBucket = function(space, data, bucket_id)
         if not(data) or not(bucket_id) then return end
-        local dataTuple = box.tuple.new(data[1]):update({{'!', box.space[space].index.bucket_id.parts[1].fieldno, bucket_id}})
+        local dataTuple = box.tuple.new(data[1]):update({{'!', art.core.bucketFieldNumber(space), bucket_id}})
         return {dataTuple, data[2]}
     end,
 
     removeBucket = function(space, data)
         if not(data) or not(data[2]) then return data end
-        local dataTuple = box.tuple.new(data[1]):update({{'#', box.space[space].index.bucket_id.parts[1].fieldno, 1}})
+        local dataTuple = box.tuple.new(data[1]):update({{'#', art.core.bucketFieldNumber(space), 1}})
         return {dataTuple, data[2]}
     end,
 
@@ -59,9 +64,8 @@ local core = {
     end,
 
     correctUpdateOperations = function(space, operations)
-        local fieldno = box.space[space].index.bucket_id.parts[1].fieldno
         for index, command in pairs(operations[1]) do
-            if command[2] >= fieldno then operations[1][index][2] = command[2] + 1 end
+            if command[2] >= art.core.bucketFieldNumber(space) then operations[1][index][2] = command[2] + 1 end
         end
         return operations
     end,

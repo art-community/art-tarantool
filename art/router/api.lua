@@ -146,18 +146,33 @@ local api = {
         return art.core.removeBucket(space, response)
     end,
 
-    select = function(space, request, index, ...)
+    select = function(space, request, index, iter, stream)
         if not (index) then index = 0 end
+        if not (iter) then iter = 'EQ' end
+        if not (stream) then stream = {} end
         local get_requests = {}
         local key_fields_mapping = {}
         local request_entry
         local result = {}
+        local bucketFieldNumber = art.core.bucketFieldNumber(space)
 
         for _,part in pairs(box.space[space].index[0].parts) do
             key_fields_mapping[part.fieldno] = true
         end
 
-        for _,mapping_entry in pairs(box.space[space].index[index]:select(request, ...)) do
+
+        local gen, param, state = box.space[space].index[index]:pairs(request, {iterator = iter})
+        for _, operation in pairs(stream) do
+            if ((operation[1] == 'filter') or (operation[1] == 'sort')) and (operation[2][2] >= bucketFieldNumber) then
+                operation[2][2] = operation[2][2] + 1
+            end
+            gen, param, state = art.core.stream[operation[1]](gen, param, state, operation[2])
+        end
+        local mappingResponse = art.core.stream.collect(gen, param, state)
+        if mappingResponse[1] == nil then return {} end
+
+
+        for _,mapping_entry in pairs(mappingResponse) do
             if not (get_requests[mapping_entry.bucket_id]) then get_requests[mapping_entry.bucket_id] = {} end
             request_entry = {}
             for k in pairs(key_fields_mapping) do
