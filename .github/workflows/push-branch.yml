@@ -1,8 +1,5 @@
 name: ART Tarantool Build
-on:
-  push:
-    branches-ignore:
-      - main
+on: [ push ]
 jobs:
   gradle:
     strategy:
