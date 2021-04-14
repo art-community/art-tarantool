@@ -1,0 +1,21 @@
+name: ART Tarantool Build
+on:
+  push:
+    branches-ignore:
+      - main
+jobs:
+  gradle:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        lua: [ 5.1.5 ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: leafo/gh-actions-lua@v8.0.0
+        with:
+          java-version: ${{ matrix.lua }}
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+      - name: Build with Gradle
+        run: ./gradlew clean build --max-workers 8 --parallel
