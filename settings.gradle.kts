@@ -25,7 +25,7 @@ pluginManagement {
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id == "art-internal-lua") useModule("io.art.gradle:art-gradle:${requested.version}")
+            if (requested.id.id == "art-internal-lua") useModule("io.art.gradle:art-gradle:main")
         }
     }
 }
