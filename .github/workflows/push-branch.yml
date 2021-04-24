@@ -1,7 +1,7 @@
-name: ART Tarantool Build
+name: ART Tarantool Branch
 on: [ push ]
 jobs:
-  gradle:
+  gradle-build:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
