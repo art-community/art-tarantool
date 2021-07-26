@@ -1,5 +1,5 @@
 plugins {
-    id("art-internal-lua") version "main"
+    id("art-internal-lua")
 }
 
 lua {

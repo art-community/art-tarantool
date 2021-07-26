@@ -30,4 +30,9 @@ pluginManagement {
             }
         }
     }
+
+    plugins {
+        val internalPluginVersion: String by settings
+        id("art-internal-lua") version internalPluginVersion
+    }
 }
