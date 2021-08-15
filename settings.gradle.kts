@@ -27,7 +27,7 @@ pluginManagement {
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id.contains("art")) {
-                useModule("io.art.gradle:art-gradle:$internalPluginVersion}")
+                useModule("io.art.gradle:art-gradle:$internalPluginVersion")
             }
         }
     }
