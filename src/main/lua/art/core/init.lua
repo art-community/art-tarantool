@@ -1,6 +1,7 @@
 local core = {
     test = function()
         require("log").info("test")
+        return {r = "test"}
     end,
 
     schemaOf = function(space)
