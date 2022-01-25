@@ -82,6 +82,7 @@ local box = {
         box.schema.space.create(name, configuration)
     end,
 
+
     spaces = function()
         local result = {}
         for _, value in pairs(box.space._space:select()) do
