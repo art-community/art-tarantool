@@ -1,15 +1,13 @@
 art = {
-    core = require('art.core'),
+    box = require("art.storage.box"),
 
-    config = require('art.storage.config'),
-
-    box = require('art.storage.box'),
-
-    cluster = require('art.storage.cluster'),
-
-    transaction = require('art.storage.transaction'),
-
-    api = require('art.storage.api')
+    stream = require("art.storage.stream")
 }
 
-return art
+for name in pairs(art.box) do
+    box.schema.func("art.box." .. name, { if_not_exists = true })
+end
+
+for name in pairs(art.stream) do
+    box.schema.func("art.stream." .. name, { if_not_exists = true })
+end

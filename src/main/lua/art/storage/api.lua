@@ -57,11 +57,11 @@ local api = {
     end,
 
     get = function(space, key, index)
-        return art.box.get(space, key, index)
+        return art.box.first(space, key, index)
     end,
 
     getBatch = function(space, keys)
-        return art.box.getBatch(space, keys)
+        return art.box.find(space, keys)
     end,
 
     delete = function(space, key)
@@ -100,7 +100,7 @@ local api = {
     end,
 
     select = function(space, request, index, iterator, stream)
-        return art.core.atomic(art.box.select, space, request, index, iterator, stream)
+        return art.core.atomic(art.box.find, space, request, index, iterator, stream)
     end
 }
 
