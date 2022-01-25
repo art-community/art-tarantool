@@ -11,8 +11,7 @@ local box = {
         for _, key in pairs(keys) do
             table.insert(result, art.box.findFirst(space, key))
         end
-        return result
-    end,
+        return result end,
 
     find = function(space, filter)
         return {}
