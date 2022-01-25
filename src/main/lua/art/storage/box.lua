@@ -82,7 +82,7 @@ local box = {
         box.schema.space.create(name, configuration)
     end,
 
-    getSpaces = function()
+    spaces = function()
         local result = {}
         for _, value in pairs(box.space._space:select()) do
             if not (string.startswith(value[3], '_')) then
@@ -92,7 +92,7 @@ local box = {
         return result
     end,
 
-    getIndexes = function(space)
+    indexes = function(space)
         local result = {}
         for _, value in pairs(box.space[space].index) do
             table.insert(result, value.name)
