@@ -5,6 +5,9 @@ local netbox = require('net.box') -- for net.box:self()
 local trigger = require('internal.trigger')
 local ffi = require('ffi')
 local yaml_encode = require('yaml').encode
+local fiber_clock = lfiber.clock
+local netbox_self = netbox.self
+local netbox_self_call = netbox_self.call
 
 local MODULE_INTERNALS = '__module_vshard_storage'
 -- Reload requirements, in case this module is reloaded manually.
@@ -13,19 +16,25 @@ if rawget(_G, MODULE_INTERNALS) then
         'vshard.consts', 'vshard.error', 'vshard.cfg',
         'vshard.replicaset', 'vshard.util',
         'vshard.storage.reload_evolution',
-        'vshard.lua_gc',
+        'vshard.lua_gc', 'vshard.rlist', 'vshard.registry',
+        'vshard.heap', 'vshard.storage.ref', 'vshard.storage.sched',
     }
     for _, module in pairs(vshard_modules) do
         package.loaded[module] = nil
     end
 end
+local rlist = require('vshard.rlist')
 local consts = require('vshard.consts')
 local lerror = require('vshard.error')
 local lcfg = require('vshard.cfg')
 local lreplicaset = require('vshard.replicaset')
 local util = require('vshard.util')
 local lua_gc = require('vshard.lua_gc')
+local lregistry = require('vshard.registry')
+local lref = require('vshard.storage.ref')
+local lsched = require('vshard.storage.sched')
 local reload_evolution = require('vshard.storage.reload_evolution')
+local fiber_cond_wait = util.fiber_cond_wait
 local bucket_ref_new
 
 local M = rawget(_G, MODULE_INTERNALS)
@@ -67,7 +76,6 @@ if not M then
         total_bucket_count = 0,
         errinj = {
             ERRINJ_CFG = false,
-            ERRINJ_BUCKET_FIND_GARBAGE_DELAY = false,
             ERRINJ_RELOAD = false,
             ERRINJ_CFG_DELAY = false,
             ERRINJ_LONG_RECEIVE = false,
@@ -94,6 +102,8 @@ if not M then
         -- detect that _bucket was not changed between yields.
         --
         bucket_generation = 0,
+        -- Condition variable fired on generation update.
+        bucket_generation_cond = lfiber.cond(),
         --
         -- Reference to the function used as on_replace trigger on
         -- _bucket space. It is used to replace the trigger with
@@ -105,12 +115,42 @@ if not M then
         -- replace the old function is to keep its reference.
         --
         bucket_on_replace = nil,
+        --
+        -- Reference to the function used as on_replace trigger on
+        -- _schema space. Saved explicitly by the same reason as
+        -- _bucket on_replace.
+        -- It is used by replicas to wait for schema bootstrap
+        -- because they might be configured earlier than the
+        -- master.
+        schema_on_replace = nil,
+        -- Fast alternative to box.space._bucket:count(). But may be nil. Reset
+        -- on each generation change.
+        bucket_count_cache = nil,
+        -- Fast alternative to checking multiple keys presence in
+        -- box.space._bucket status index. But may be nil. Reset on each
+        -- generation change.
+        bucket_are_all_rw_cache = nil,
+        -- Redirects for recently sent buckets. They are kept for a while to
+        -- help routers find a new location for sent and deleted buckets without
+        -- whole cluster scan.
+        route_map = {},
+        -- Flag whether vshard.storage.cfg() is finished.
+        is_configured = false,
+        -- Flag whether box.info.status is acceptable. For instance, 'loading'
+        -- is not.
+        is_loaded = false,
+        -- Flag whether the instance is enabled manually. It is true by default
+        -- for backward compatibility with old vshard.
+        is_enabled = true,
+        -- Reference to the function-proxy to most of the public functions. It
+        -- allows to avoid 'if's in each function by adding expensive
+        -- conditional checks in one rarely used version of the wrapper and no
+        -- checks into the other almost always used wrapper.
+        api_call_cache = nil,
 
         ------------------- Garbage collection -------------------
         -- Fiber to remove garbage buckets data.
         collect_bucket_garbage_fiber = nil,
-        -- Do buckets garbage collection once per this time.
-        collect_bucket_garbage_interval = nil,
         -- Boolean lua_gc state (create periodic gc task).
         collect_lua_garbage = nil,
 
@@ -120,7 +160,7 @@ if not M then
         ----------------------- Rebalancer -----------------------
         -- Fiber to rebalance a cluster.
         rebalancer_fiber = nil,
-        -- Fiber which applies routes one by one. Its presense and
+        -- Fiber which applies routes one by one. Its presence and
         -- active status means that the rebalancing is in progress
         -- now on the current node.
         rebalancer_applier_fiber = nil,
@@ -149,7 +189,7 @@ if not M then
         rebalancer_worker_count = consts.DEFAULT_REBALANCER_WORKER_COUNT,
         -- Map of bucket ro/rw reference counters. These counters
         -- works like bucket pins, but countable and are not
-        -- persisted. Persistency is not needed since the refs are
+        -- persisted. Persistence is not needed since the refs are
         -- used to keep a bucket during a request execution, but
         -- on restart evidently each request fails.
         bucket_refs = {},
@@ -164,13 +204,99 @@ if not M then
     }
 else
     bucket_ref_new = ffi.typeof("struct bucket_ref")
+
+    -- It is not set when reloaded from an old vshard version.
+    if M.is_enabled == nil then
+        M.is_enabled = true
+    end
+end
+
+--
+-- Invoke a function on this instance. Arguments are unpacked into the function
+-- as arguments.
+-- The function returns pcall() as is, because is used from places where
+-- exceptions are not allowed.
+--
+local function local_call(func_name, args)
+    return pcall(netbox_self_call, netbox_self, func_name, args)
+end
+
+--
+-- Get number of buckets stored on this storage. Regardless of their state.
+--
+-- The idea is that all the code should use one function ref to get the bucket
+-- count. But inside the function never branches. Instead, it points at one of 2
+-- branch-less functions. Cached one simply returns a number which is supposed
+-- to be super fast. Non-cached remembers the count and changes the global
+-- function to the cached one. So on the next call it is cheap. No 'if's at all.
+--
+local bucket_count
+
+local function bucket_count_cache()
+    return M.bucket_count_cache
+end
+
+local function bucket_count_not_cache()
+    local count = box.space._bucket:count()
+    M.bucket_count_cache = count
+    bucket_count = bucket_count_cache
+    return count
+end
+
+bucket_count = bucket_count_not_cache
+
+--
+-- Can't expose bucket_count to the public API as is. Need this proxy-call.
+-- Because the original function changes at runtime.
+--
+local function bucket_count_public()
+    return bucket_count()
+end
+
+--
+-- Check if all buckets on the storage are writable. The idea is the same as
+-- with bucket count - the value changes very rare, and is cached most of the
+-- time. Only that its non-cached calculation is more expensive than with count.
+--
+local bucket_are_all_rw
+
+local function bucket_are_all_rw_cache()
+    return M.bucket_are_all_rw_cache
+end
+
+local function bucket_are_all_rw_not_cache()
+    local status_index = box.space._bucket.index.status
+    local status = consts.BUCKET
+    local res = not status_index:min(status.SENDING) and
+       not status_index:min(status.SENT) and
+       not status_index:min(status.RECEIVING) and
+       not status_index:min(status.GARBAGE)
+
+    M.bucket_are_all_rw_cache = res
+    bucket_are_all_rw = bucket_are_all_rw_cache
+    return res
+end
+
+bucket_are_all_rw = bucket_are_all_rw_not_cache
+
+local function bucket_are_all_rw_public()
+    return bucket_are_all_rw()
 end
 
 --
 -- Trigger for on replace into _bucket to update its generation.
 --
 local function bucket_generation_increment()
+    bucket_count = bucket_count_not_cache
+    bucket_are_all_rw = bucket_are_all_rw_not_cache
+    M.bucket_count_cache = nil
+    M.bucket_are_all_rw_cache = nil
     M.bucket_generation = M.bucket_generation + 1
+    M.bucket_generation_cond:broadcast()
+end
+
+local function bucket_generation_wait(timeout)
+    return fiber_cond_wait(M.bucket_generation_cond, timeout)
 end
 
 --
@@ -296,6 +422,62 @@ local schema_version_mt = {
 
 local function schema_version_make(ver)
     return setmetatable(ver, schema_version_mt)
+end
+
+local function schema_install_triggers()
+    local _bucket = box.space._bucket
+    if M.bucket_on_replace then
+        local ok, err = pcall(_bucket.on_replace, _bucket, nil,
+                              M.bucket_on_replace)
+        if not ok then
+            log.warn('Could not drop old trigger from '..
+                     '_bucket: %s', err)
+        end
+    end
+    _bucket:on_replace(bucket_generation_increment)
+    M.bucket_on_replace = bucket_generation_increment
+end
+
+local function schema_install_on_replace(_, new)
+    -- Wait not just for _bucket to appear, but for the entire
+    -- schema. This might be important if the schema will ever
+    -- consist of more than just _bucket.
+    if new == nil or new[1] ~= 'vshard_version' then
+        return
+    end
+    schema_install_triggers()
+
+    local _schema = box.space._schema
+    local ok, err = pcall(_schema.on_replace, _schema, nil, M.schema_on_replace)
+    if not ok then
+        log.warn('Could not drop trigger from _schema inside of the '..
+                 'trigger: %s', err)
+    end
+    M.schema_on_replace = nil
+    -- Drop the caches which might have been created while the
+    -- schema was being replicated.
+    bucket_generation_increment()
+end
+
+--
+-- Install the triggers later when there is an actual schema to install them on.
+-- On replicas it might happen that they are vshard-configured earlier than the
+-- master and therefore don't have the schema right away.
+--
+local function schema_install_triggers_delayed()
+    log.info('Could not find _bucket space to install triggers - delayed '..
+             'until the schema is replicated')
+    assert(not box.space._bucket)
+    local _schema = box.space._schema
+    if M.schema_on_replace then
+        local ok, err = pcall(_schema.on_replace, _schema, nil,
+                              M.schema_on_replace)
+        if not ok then
+            log.warn('Could not drop trigger from _schema: %s', err)
+        end
+    end
+    _schema:on_replace(schema_install_on_replace)
+    M.schema_on_replace = schema_install_on_replace
 end
 
 -- VShard versioning works in 4 numbers: major, minor, patch, and
@@ -506,19 +688,19 @@ local function this_is_master()
            M.this_replica == M.this_replicaset.master
 end
 
-local function on_master_disable(...)
-    M._on_master_disable(...)
+local function on_master_disable(new_func, old_func)
+    M._on_master_disable(new_func, old_func)
     -- If a trigger is set after storage.cfg(), then notify an
     -- user, that the current instance is not master.
-    if select('#', ...) == 1 and not this_is_master() then
+    if old_func == nil and not this_is_master() then
         M._on_master_disable:run()
     end
 end
 
-local function on_master_enable(...)
-    M._on_master_enable(...)
+local function on_master_enable(new_func, old_func)
+    M._on_master_enable(new_func, old_func)
     -- Same as above, but notify, that the instance is master.
-    if select('#', ...) == 1 and this_is_master() then
+    if old_func == nil and this_is_master() then
         M._on_master_enable:run()
     end
 end
@@ -569,24 +751,28 @@ end
 --
 local function recovery_step_by_type(type)
     local _bucket = box.space._bucket
-    local is_empty = true
+    local is_step_empty = true
     local recovered = 0
     local total = 0
+    local start_format = 'Starting %s buckets recovery step'
     for _, bucket in _bucket.index.status:pairs(type) do
         total = total + 1
         local bucket_id = bucket.id
         if M.rebalancer_transfering_buckets[bucket_id] then
             goto continue
         end
-        if is_empty then
-            log.info('Starting %s buckets recovery step', type)
-        end
-        is_empty = false
         assert(bucket_is_transfer_in_progress(bucket))
-        local destination = M.replicasets[bucket.destination]
+        local peer_uuid = bucket.destination
+        local destination = M.replicasets[peer_uuid]
         if not destination or not destination.master then
             -- No replicaset master for a bucket. Wait until it
             -- appears.
+            if is_step_empty then
+                log.info(start_format, type)
+                log.warn('Can not find for bucket %s its peer %s', bucket_id,
+                         peer_uuid)
+                is_step_empty = false
+            end
             goto continue
         end
         local remote_bucket, err =
@@ -595,6 +781,15 @@ local function recovery_step_by_type(type)
         -- not be used to recovery anything. Try later.
         if not remote_bucket and (not err or err.type ~= 'ShardingError' or
                                   err.code ~= lerror.code.WRONG_BUCKET) then
+            if is_step_empty then
+                if err == nil then
+                    err = 'unknown'
+                end
+                log.info(start_format, type)
+                log.error('Error during recovery of bucket %s on replicaset '..
+                          '%s: %s', bucket_id, peer_uuid, err)
+                is_step_empty = false
+            end
             goto continue
         end
         -- Do nothing until the bucket on both sides stopped
@@ -608,16 +803,23 @@ local function recovery_step_by_type(type)
         if not bucket or not bucket_is_transfer_in_progress(bucket) then
             goto continue
         end
+        if is_step_empty then
+            log.info(start_format, type)
+        end
         if recovery_local_bucket_is_garbage(bucket, remote_bucket) then
             _bucket:update({bucket_id}, {{'=', 2, consts.BUCKET.GARBAGE}})
             recovered = recovered + 1
         elseif recovery_local_bucket_is_active(bucket, remote_bucket) then
             _bucket:replace({bucket_id, consts.BUCKET.ACTIVE})
             recovered = recovered + 1
+        elseif is_step_empty then
+            log.info('Bucket %s is %s local and %s on replicaset %s, waiting',
+                     bucket_id, bucket.status, remote_bucket.status, peer_uuid)
         end
+        is_step_empty = false
 ::continue::
     end
-    if not is_empty then
+    if not is_step_empty then
         log.info('Finish bucket recovery step, %d %s buckets are recovered '..
                  'among %d', recovered, type, total)
     end
@@ -628,13 +830,16 @@ end
 -- Infinite function to resolve status of buckets, whose 'sending'
 -- has failed due to tarantool or network problems. Restarts on
 -- reload.
--- @param module_version Module version, on which the current
---        function had been started. If the actual module version
---        appears to be changed, then stop recovery. It is
---        restarted in reloadable_fiber.
 --
 local function recovery_f()
     local module_version = M.module_version
+    -- Change of _bucket increments bucket generation. Recovery has its own
+    -- bucket generation which is <= actual. Recovery is finished, when its
+    -- generation == bucket generation. In such a case the fiber does nothing
+    -- until next _bucket change.
+    local bucket_generation_recovered = -1
+    local bucket_generation_current = M.bucket_generation
+    local ok, sleep_time, is_all_recovered, total, recovered
     -- Interrupt recovery if a module has been reloaded. Perhaps,
     -- there was found a bug, and reload fixes it.
     while module_version == M.module_version do
@@ -642,22 +847,57 @@ local function recovery_f()
             lfiber.yield()
             goto continue
         end
-        local ok, total, recovered = pcall(recovery_step_by_type,
-                                           consts.BUCKET.SENDING)
-        if not ok then
-            log.error('Error during sending buckets recovery: %s', total)
+        is_all_recovered = true
+        if bucket_generation_recovered == bucket_generation_current then
+            goto sleep
         end
+
+        ok, total, recovered = pcall(recovery_step_by_type,
+                                     consts.BUCKET.SENDING)
+        if not ok then
+            is_all_recovered = false
+            log.error('Error during sending buckets recovery: %s', total)
+        elseif total ~= recovered then
+            is_all_recovered = false
+        end
+
         ok, total, recovered = pcall(recovery_step_by_type,
                                      consts.BUCKET.RECEIVING)
         if not ok then
+            is_all_recovered = false
             log.error('Error during receiving buckets recovery: %s', total)
         elseif total == 0 then
             bucket_receiving_quota_reset()
         else
             bucket_receiving_quota_add(recovered)
+            if total ~= recovered then
+                is_all_recovered = false
+            end
         end
-        lfiber.sleep(consts.RECOVERY_INTERVAL)
-        ::continue::
+
+    ::sleep::
+        if not is_all_recovered then
+            bucket_generation_recovered = -1
+        else
+            bucket_generation_recovered = bucket_generation_current
+        end
+        bucket_generation_current = M.bucket_generation
+
+        if not is_all_recovered then
+            -- One option - some buckets are not broken. Their transmission is
+            -- still in progress. Don't need to retry immediately. Another
+            -- option - network errors when tried to repair the buckets. Also no
+            -- need to retry often. It won't help.
+            sleep_time = consts.RECOVERY_BACKOFF_INTERVAL
+        elseif bucket_generation_recovered ~= bucket_generation_current then
+            sleep_time = 0
+        else
+            sleep_time = consts.TIMEOUT_INFINITY
+        end
+        if module_version == M.module_version then
+            M.bucket_generation_cond:wait(sleep_time)
+        end
+    ::continue::
     end
 end
 
@@ -694,7 +934,7 @@ local function sync(timeout)
     log.debug("Synchronizing replicaset...")
     timeout = timeout or M.sync_timeout
     local vclock = box.info.vclock
-    local tstart = lfiber.time()
+    local tstart = fiber_clock()
     repeat
         local done = true
         for _, replica in ipairs(box.info.replication) do
@@ -710,10 +950,9 @@ local function sync(timeout)
             return true
         end
         lfiber.sleep(0.001)
-    until not (lfiber.time() <= tstart + timeout)
+    until fiber_clock() > tstart + timeout
     log.warn("Timed out during synchronizing replicaset")
-    local ok, err = pcall(box.error, box.error.TIMEOUT)
-    return nil, lerror.make(err)
+    return nil, lerror.timeout()
 end
 
 --------------------------------------------------------------------------------
@@ -750,14 +989,19 @@ local function bucket_check_state(bucket_id, mode)
         end
         reason = 'write is prohibited'
     elseif M.this_replicaset.master ~= M.this_replica then
+        local master_uuid = M.this_replicaset.master
+        if master_uuid then
+            master_uuid = master_uuid.uuid
+        end
         return bucket, lerror.vshard(lerror.code.NON_MASTER,
                                      M.this_replica.uuid,
-                                     M.this_replicaset.uuid)
+                                     M.this_replicaset.uuid, master_uuid)
     else
         return bucket
     end
+    local dst = bucket and bucket.destination or M.route_map[bucket_id]
     return bucket, lerror.vshard(lerror.code.WRONG_BUCKET, bucket_id, reason,
-                                 bucket and bucket.destination)
+                                 dst)
 end
 
 --
@@ -802,11 +1046,23 @@ end
 --
 local function bucket_unrefro(bucket_id)
     local ref = M.bucket_refs[bucket_id]
-    if not ref or ref.ro == 0 then
+    local count = ref and ref.ro or 0
+    if count == 0 then
         return nil, lerror.vshard(lerror.code.WRONG_BUCKET, bucket_id,
                                   "no refs", nil)
     end
-    ref.ro = ref.ro - 1
+    if count == 1 then
+        ref.ro = 0
+        if ref.ro_lock then
+            -- Garbage collector is waiting for the bucket if RO
+            -- is locked. Let it know it has one more bucket to
+            -- collect. It relies on generation, so its increment
+            -- is enough.
+            bucket_generation_increment()
+        end
+        return true
+    end
+    ref.ro = count - 1
     return true
 end
 
@@ -975,7 +1231,7 @@ end
 --        It is set to true when the data portion is last and the
 --        bucket can be activated here.
 --
--- @retval nil, error Error occured.
+-- @retval nil, error Error occurred.
 -- @retval true The data is received ok.
 --
 local function bucket_recv_xc(bucket_id, from, data, opts)
@@ -993,10 +1249,33 @@ local function bucket_recv_xc(bucket_id, from, data, opts)
             return nil, lerror.vshard(lerror.code.WRONG_BUCKET, bucket_id, msg,
                                       from)
         end
+        if is_this_replicaset_locked() then
+            return nil, lerror.vshard(lerror.code.REPLICASET_IS_LOCKED)
+        end
         if not bucket_receiving_quota_add(-1) then
             return nil, lerror.vshard(lerror.code.TOO_MANY_RECEIVING)
         end
-        _bucket:insert({bucket_id, recvg, from})
+        local timeout = opts and opts.timeout or
+                        consts.DEFAULT_BUCKET_SEND_TIMEOUT
+        local ok, err = lsched.move_start(timeout)
+        if not ok then
+            return nil, err
+        end
+        assert(lref.count == 0)
+        -- Move schedule is done only for the time of _bucket update.
+        -- The reason is that one bucket_send() calls bucket_recv() on the
+        -- remote storage multiple times. If the latter would schedule new moves
+        -- on each call, it could happen that the scheduler would block it in
+        -- favor of refs right in the middle of bucket_send().
+        -- It would lead to a deadlock, because refs won't be able to start -
+        -- the bucket won't be writable.
+        -- This way still provides fair scheduling, but does not have the
+        -- described issue.
+        ok, err = pcall(_bucket.insert, _bucket, {bucket_id, recvg, from})
+        lsched.move_end(1)
+        if not ok then
+            return nil, lerror.make(err)
+        end
     elseif b.status ~= recvg then
         local msg = string.format("bucket state is changed: was receiving, "..
                                   "became %s", b.status)
@@ -1017,7 +1296,13 @@ local function bucket_recv_xc(bucket_id, from, data, opts)
         end
         box.begin()
         for _, tuple in ipairs(space_data) do
-            space:insert(tuple)
+            local ok, err = pcall(space.insert, space, tuple)
+            if not ok then
+                box.rollback()
+                return nil, lerror.vshard(lerror.code.BUCKET_RECV_DATA_ERROR,
+                                          bucket_id, space.name,
+                                          box.tuple.new(tuple), err)
+            end
             limit = limit - 1
             if limit == 0 then
                 box.commit()
@@ -1094,6 +1379,13 @@ local function find_sharded_spaces()
     sharded_spaces_cache_schema_version = box.internal.schema_version()
     sharded_spaces_cache = spaces
     return spaces
+end
+
+--
+-- Public wrapper for sharded spaces list getter.
+--
+local function storage_sharded_spaces()
+    return table.deepcopy(find_sharded_spaces())
 end
 
 if M.errinj.ERRINJ_RELOAD then
@@ -1279,12 +1571,12 @@ local function bucket_send_xc(bucket_id, destination, opts, exception_guard)
     ref.rw_lock = true
     exception_guard.ref = ref
     exception_guard.drop_rw_lock = true
-    local deadline = lfiber.clock() + (opts and opts.timeout or 10)
+    local timeout = opts and opts.timeout or consts.DEFAULT_BUCKET_SEND_TIMEOUT
+    local deadline = fiber_clock() + timeout
     while ref.rw ~= 0 do
-        if not M.bucket_rw_lock_is_ready_cond:wait(deadline -
-                                                   lfiber.clock()) then
-            status, err = pcall(box.error, box.error.TIMEOUT)
-            return nil, lerror.make(err)
+        timeout = deadline - fiber_clock()
+        if not M.bucket_rw_lock_is_ready_cond:wait(timeout) then
+            return nil, lerror.timeout()
         end
         lfiber.testcancel()
     end
@@ -1310,7 +1602,25 @@ local function bucket_send_xc(bucket_id, destination, opts, exception_guard)
     local idx = M.shard_index
     local bucket_generation = M.bucket_generation
     local sendg = consts.BUCKET.SENDING
-    _bucket:replace({bucket_id, sendg, destination})
+
+    local ok, err = lsched.move_start(timeout)
+    if not ok then
+        return nil, err
+    end
+    assert(lref.count == 0)
+    -- Move is scheduled only for the time of _bucket update because:
+    --
+    -- * it is consistent with bucket_recv() (see its comments);
+    --
+    -- * gives the same effect as if move was in the scheduler for the whole
+    --   bucket_send() time, because refs won't be able to start anyway - the
+    --   bucket is not writable.
+    ok, err = pcall(_bucket.replace, _bucket, {bucket_id, sendg, destination})
+    lsched.move_end(1)
+    if not ok then
+        return nil, lerror.make(err)
+    end
+
     -- From this moment the bucket is SENDING. Such a status is
     -- even stronger than the lock.
     ref.rw_lock = false
@@ -1475,79 +1785,44 @@ local function gc_bucket_in_space(space, bucket_id, status)
 end
 
 --
--- Remove tuples from buckets of a specified type.
--- @param type Type of buckets to gc.
--- @retval List of ids of empty buckets of the type.
+-- Drop buckets with the given status along with their data in all spaces.
+-- @param status Status of target buckets.
+-- @param route_map Destinations of deleted buckets are saved into this table.
 --
-local function gc_bucket_step_by_type(type)
-    local sharded_spaces = find_sharded_spaces()
-    local empty_buckets = {}
+local function gc_bucket_drop_xc(status, route_map)
     local limit = consts.BUCKET_CHUNK_SIZE
-    local is_all_collected = true
-    for _, bucket in box.space._bucket.index.status:pairs(type) do
-        local bucket_id = bucket.id
-        local ref = M.bucket_refs[bucket_id]
+    local _bucket = box.space._bucket
+    local sharded_spaces = find_sharded_spaces()
+    for _, b in _bucket.index.status:pairs(status) do
+        local id = b.id
+        local ref = M.bucket_refs[id]
         if ref then
             assert(ref.rw == 0)
             if ref.ro ~= 0 then
                 ref.ro_lock = true
-                is_all_collected = false
                 goto continue
             end
-            M.bucket_refs[bucket_id] = nil
+            M.bucket_refs[id] = nil
         end
         for _, space in pairs(sharded_spaces) do
-            gc_bucket_in_space_xc(space, bucket_id, type)
+            gc_bucket_in_space_xc(space, id, status)
             limit = limit - 1
             if limit == 0 then
                 lfiber.sleep(0)
                 limit = consts.BUCKET_CHUNK_SIZE
             end
         end
-        table.insert(empty_buckets, bucket.id)
-::continue::
+        route_map[id] = b.destination
+        _bucket:delete{id}
+    ::continue::
     end
-    return empty_buckets, is_all_collected
-end
-
---
--- Drop buckets with ids in the list.
--- @param bucket_ids Bucket ids to drop.
--- @param status Expected bucket status.
---
-local function gc_bucket_drop_xc(bucket_ids, status)
-    if #bucket_ids == 0 then
-        return
-    end
-    local limit = consts.BUCKET_CHUNK_SIZE
-    box.begin()
-    local _bucket = box.space._bucket
-    for _, id in pairs(bucket_ids) do
-        local bucket_exists = _bucket:get{id} ~= nil
-        local b = _bucket:get{id}
-        if b then
-            if b.status ~= status then
-                return error(string.format('Bucket %d status is changed. Was '..
-                                           '%s, became %s', id, status,
-                                           b.status))
-            end
-            _bucket:delete{id}
-        end
-        limit = limit - 1
-        if limit == 0 then
-            box.commit()
-            box.begin()
-            limit = consts.BUCKET_CHUNK_SIZE
-        end
-    end
-    box.commit()
 end
 
 --
 -- Exception safe version of gc_bucket_drop_xc.
 --
-local function gc_bucket_drop(bucket_ids, status)
-    local status, err = pcall(gc_bucket_drop_xc, bucket_ids, status)
+local function gc_bucket_drop(status, route_map)
+    local status, err = pcall(gc_bucket_drop_xc, status, route_map)
     if not status then
         box.rollback()
     end
@@ -1555,14 +1830,16 @@ local function gc_bucket_drop(bucket_ids, status)
 end
 
 --
--- Garbage collector. Works on masters. The garbage collector
--- wakes up once per specified time.
+-- Garbage collector. Works on masters. The garbage collector wakes up when
+-- state of any bucket changes.
 -- After wakeup it follows the plan:
--- 1) Check if _bucket has changed. If not, then sleep again;
--- 2) Scan user spaces for sent and garbage buckets, delete
---    garbage data in batches of limited size;
--- 3) Delete GARBAGE buckets from _bucket immediately, and
---    schedule SENT buckets for deletion after a timeout;
+-- 1) Check if state of any bucket has really changed. If not, then sleep again;
+-- 2) Delete all GARBAGE and SENT buckets along with their data in chunks of
+--    limited size.
+-- 3) Bucket destinations are saved into a global route_map to reroute incoming
+--    requests from routers in case they didn't notice the buckets being moved.
+--    The saved routes are scheduled for deletion after a timeout, which is
+--    checked on each iteration of this loop.
 -- 4) Sleep, go to (1).
 -- For each step details see comments in the code.
 --
@@ -1574,65 +1851,75 @@ function gc_bucket_f()
     -- generation == bucket generation. In such a case the fiber
     -- does nothing until next _bucket change.
     local bucket_generation_collected = -1
-    -- Empty sent buckets are collected into an array. After a
-    -- specified time interval the buckets are deleted both from
-    -- this array and from _bucket space.
-    local buckets_for_redirect = {}
-    local buckets_for_redirect_ts = lfiber.time()
-    -- Empty sent buckets, updated after each step, and when
-    -- buckets_for_redirect is deleted, it gets empty_sent_buckets
-    -- for next deletion.
-    local empty_garbage_buckets, empty_sent_buckets, status, err
+    local bucket_generation_current = M.bucket_generation
+    -- Deleted buckets are saved into a route map to redirect routers if they
+    -- didn't discover new location of the buckets yet. However route map does
+    -- not grow infinitely. Otherwise it would end up storing redirects for all
+    -- buckets in the cluster. Which could also be outdated.
+    -- Garbage collector periodically drops old routes from the map. For that it
+    -- remembers state of route map in one moment, and after a while clears the
+    -- remembered routes from the global route map.
+    local route_map = M.route_map
+    local route_map_old = {}
+    local route_map_deadline = 0
+    local status, err
     while M.module_version == module_version do
-        -- Check if no changes in buckets configuration.
-        if bucket_generation_collected ~= M.bucket_generation then
-            local bucket_generation = M.bucket_generation
-            local is_sent_collected, is_garbage_collected
-            status, empty_garbage_buckets, is_garbage_collected =
-                pcall(gc_bucket_step_by_type, consts.BUCKET.GARBAGE)
-            if not status then
-                err = empty_garbage_buckets
-                goto check_error
+        if bucket_generation_collected ~= bucket_generation_current then
+            status, err = gc_bucket_drop(consts.BUCKET.GARBAGE, route_map)
+            if status then
+                status, err = gc_bucket_drop(consts.BUCKET.SENT, route_map)
             end
-            status, empty_sent_buckets, is_sent_collected =
-                pcall(gc_bucket_step_by_type, consts.BUCKET.SENT)
-            if not status then
-                err = empty_sent_buckets
-                goto check_error
-            end
-            status, err = gc_bucket_drop(empty_garbage_buckets,
-                                         consts.BUCKET.GARBAGE)
-::check_error::
             if not status then
                 box.rollback()
                 log.error('Error during garbage collection step: %s', err)
-                goto continue
+            else
+                -- Don't use global generation. During the collection it could
+                -- already change. Instead, remember the generation known before
+                -- the collection has started.
+                -- Since the collection also changes the generation, it makes
+                -- the GC happen always at least twice. But typically on the
+                -- second iteration it should not find any buckets to collect,
+                -- and then the collected generation matches the global one.
+                bucket_generation_collected = bucket_generation_current
             end
-            if is_sent_collected and is_garbage_collected then
-                bucket_generation_collected = bucket_generation
+        else
+            status = true
+        end
+
+        local sleep_time = route_map_deadline - fiber_clock()
+        if sleep_time <= 0 then
+            local chunk = consts.LUA_CHUNK_SIZE
+            util.table_minus_yield(route_map, route_map_old, chunk)
+            route_map_old = util.table_copy_yield(route_map, chunk)
+            if next(route_map_old) then
+                sleep_time = consts.BUCKET_SENT_GARBAGE_DELAY
+            else
+                sleep_time = consts.TIMEOUT_INFINITY
+            end
+            route_map_deadline = fiber_clock() + sleep_time
+        end
+        bucket_generation_current = M.bucket_generation
+
+        if bucket_generation_current ~= bucket_generation_collected then
+            -- Generation was changed during collection. Or *by* collection.
+            if status then
+                -- Retry immediately. If the generation was changed by the
+                -- collection itself, it will notice it next iteration, and go
+                -- to proper sleep.
+                sleep_time = 0
+            else
+                -- An error happened during the collection. Does not make sense
+                -- to retry on each iteration of the event loop. The most likely
+                -- errors are either a WAL error or a transaction abort - both
+                -- look like an issue in the user's code and can't be fixed
+                -- quickly anyway. Backoff.
+                sleep_time = consts.GC_BACKOFF_INTERVAL
             end
         end
 
-        if lfiber.time() - buckets_for_redirect_ts >=
-           consts.BUCKET_SENT_GARBAGE_DELAY then
-            status, err = gc_bucket_drop(buckets_for_redirect,
-                                         consts.BUCKET.SENT)
-            if not status then
-                buckets_for_redirect = {}
-                empty_sent_buckets = {}
-                bucket_generation_collected = -1
-                log.error('Error during deletion of empty sent buckets: %s',
-                          err)
-            elseif M.module_version ~= module_version then
-                return
-            else
-                buckets_for_redirect = empty_sent_buckets or {}
-                empty_sent_buckets = nil
-                buckets_for_redirect_ts = lfiber.time()
-            end
+        if M.module_version == module_version then
+            M.bucket_generation_cond:wait(sleep_time)
         end
-::continue::
-        lfiber.sleep(M.collect_bucket_garbage_interval)
     end
 end
 
@@ -1787,54 +2074,6 @@ local function rebalancer_build_routes(replicasets)
 end
 
 --
--- A subset of rlist methods from the main repository. Rlist is a
--- doubly linked list, and is used here to implement a queue of
--- routes in the parallel rebalancer.
---
-local function rlist_new()
-    return {count = 0}
-end
-
-local function rlist_add_tail(rlist, object)
-    local last = rlist.last
-    if last then
-        last.next = object
-        object.prev = last
-    else
-        rlist.first = object
-    end
-    rlist.last = object
-    rlist.count = rlist.count + 1
-end
-
-local function rlist_remove(rlist, object)
-    local prev = object.prev
-    local next = object.next
-    local belongs_to_list = false
-    if prev then
-        belongs_to_list = true
-        prev.next = next
-    end
-    if next then
-        belongs_to_list = true
-        next.prev = prev
-    end
-    object.prev = nil
-    object.next = nil
-    if rlist.last == object then
-        belongs_to_list = true
-        rlist.last = prev
-    end
-    if rlist.first == object then
-        belongs_to_list = true
-        rlist.first = next
-    end
-    if belongs_to_list then
-        rlist.count = rlist.count - 1
-    end
-end
-
---
 -- Dispenser is a container of routes received from the
 -- rebalancer. Its task is to hand out the routes to worker fibers
 -- in a round-robin manner so as any two sequential results are
@@ -1842,7 +2081,7 @@ end
 -- receiver nodes.
 --
 local function route_dispenser_create(routes)
-    local rlist = rlist_new()
+    local rlist = rlist.new()
     local map = {}
     for uuid, bucket_count in pairs(routes) do
         local new = {
@@ -1873,7 +2112,7 @@ local function route_dispenser_create(routes)
         --    the main applier fiber does some analysis on the
         --    destinations.
         map[uuid] = new
-        rlist_add_tail(rlist, new)
+        rlist:add_tail(new)
     end
     return {
         rlist = rlist,
@@ -1892,7 +2131,7 @@ local function route_dispenser_put(dispenser, uuid)
         local bucket_count = dst.bucket_count + 1
         dst.bucket_count = bucket_count
         if bucket_count == 1 then
-            rlist_add_tail(dispenser.rlist, dst)
+            dispenser.rlist:add_tail(dst)
         end
     end
 end
@@ -1909,7 +2148,7 @@ local function route_dispenser_skip(dispenser, uuid)
     local dst = map[uuid]
     if dst then
         map[uuid] = nil
-        rlist_remove(dispenser.rlist, dst)
+        dispenser.rlist:remove(dst)
     end
 end
 
@@ -1952,9 +2191,9 @@ local function route_dispenser_pop(dispenser)
     if dst then
         local bucket_count = dst.bucket_count - 1
         dst.bucket_count = bucket_count
-        rlist_remove(rlist, dst)
+        rlist:remove(dst)
         if bucket_count > 0 then
-            rlist_add_tail(rlist, dst)
+            rlist:add_tail(dst)
         end
         return dst.uuid
     end
@@ -2240,7 +2479,6 @@ local function rebalancer_request_state()
     if #status_index:select({consts.BUCKET.GARBAGE}, {limit = 1}) > 0 then
         return
     end
-    local bucket_count = _bucket:count()
     return {
         bucket_active_count = status_index:count({consts.BUCKET.ACTIVE}),
         bucket_pinned_count = status_index:count({consts.BUCKET.PINNED}),
@@ -2287,13 +2525,63 @@ local function storage_call(bucket_id, mode, name, args)
     if not ok then
         return ok, err
     end
-    ok, ret1, ret2, ret3 = pcall(netbox.self.call, netbox.self, name, args)
+    ok, ret1, ret2, ret3 = local_call(name, args)
     _, err = bucket_unref(bucket_id, mode)
     assert(not err)
     if not ok then
         ret1 = lerror.make(ret1)
     end
     return ok, ret1, ret2, ret3
+end
+
+--
+-- Bind a new storage ref to the current box session. Is used as a part of
+-- Map-Reduce API.
+--
+local function storage_ref(rid, timeout)
+    local ok, err = lref.add(rid, box.session.id(), timeout)
+    if not ok then
+        return nil, err
+    end
+    return bucket_count()
+end
+
+--
+-- Drop a storage ref from the current box session. Is used as a part of
+-- Map-Reduce API.
+--
+local function storage_unref(rid)
+    return lref.del(rid, box.session.id())
+end
+
+--
+-- Execute a user's function under an infinite storage ref protecting from
+-- bucket moves. The ref should exist before, and is deleted after, regardless
+-- of the function result. Is used as a part of Map-Reduce API.
+--
+local function storage_map(rid, name, args)
+    local ok, err, res
+    local sid = box.session.id()
+    ok, err = lref.use(rid, sid)
+    if not ok then
+        return nil, err
+    end
+    ok, res = local_call(name, args)
+    if not ok then
+        lref.del(rid, sid)
+        return nil, lerror.make(res)
+    end
+    ok, err = lref.del(rid, sid)
+    if not ok then
+        return nil, err
+    end
+    return true, res
+end
+
+local function storage_service_info()
+    return {
+        is_master = this_is_master(),
+    }
 end
 
 local service_call_api
@@ -2306,12 +2594,17 @@ service_call_api = setmetatable({
     bucket_recv = bucket_recv,
     rebalancer_apply_routes = rebalancer_apply_routes,
     rebalancer_request_state = rebalancer_request_state,
+    storage_ref = storage_ref,
+    storage_unref = storage_unref,
+    storage_map = storage_map,
+    info = storage_service_info,
     test_api = service_call_test_api,
 }, {__serialize = function(api)
     local res = {}
     for k, _ in pairs(api) do
-        res[k] = true
+        table.insert(res, k)
     end
+    table.sort(res)
     return res
 end})
 
@@ -2446,14 +2739,17 @@ local function storage_cfg(cfg, this_replica_uuid, is_reload)
     local uri = luri.parse(this_replica.uri)
     schema_upgrade(is_master, uri.login, uri.password)
 
-    if M.bucket_on_replace then
-        box.space._bucket:on_replace(nil, M.bucket_on_replace)
-        M.bucket_on_replace = nil
+    -- Check for master specifically. On master _bucket space must exist.
+    -- Because it should have done the schema bootstrap. Shall not ever try to
+    -- do anything delayed.
+    if is_master or box.space._bucket then
+        schema_install_triggers()
+    else
+        schema_install_triggers_delayed()
     end
-    if is_master then
-        box.space._bucket:on_replace(bucket_generation_increment)
-        M.bucket_on_replace = bucket_generation_increment
-    end
+
+    lref.cfg()
+    lsched.cfg(vshard_cfg)
 
     lreplicaset.rebind_replicasets(new_replicasets, M.replicasets)
     lreplicaset.outdate_replicasets(M.replicasets)
@@ -2465,8 +2761,6 @@ local function storage_cfg(cfg, this_replica_uuid, is_reload)
         vshard_cfg.rebalancer_disbalance_threshold
     M.rebalancer_receiving_quota = vshard_cfg.rebalancer_max_receiving
     M.shard_index = vshard_cfg.shard_index
-    M.collect_bucket_garbage_interval =
-        vshard_cfg.collect_bucket_garbage_interval
     M.collect_lua_garbage = vshard_cfg.collect_lua_garbage
     M.rebalancer_worker_count = vshard_cfg.rebalancer_max_sending
     M.current_cfg = cfg
@@ -2495,6 +2789,7 @@ local function storage_cfg(cfg, this_replica_uuid, is_reload)
         M.rebalancer_fiber = nil
     end
     lua_gc.set_state(M.collect_lua_garbage, consts.COLLECT_LUA_GARBAGE_INTERVAL)
+    M.is_configured = true
     -- Destroy connections, not used in a new configuration.
     collectgarbage()
 end
@@ -2502,10 +2797,6 @@ end
 --------------------------------------------------------------------------------
 -- Monitoring
 --------------------------------------------------------------------------------
-
-local function storage_buckets_count()
-    return  box.space._bucket.index.pk:count()
-end
 
 local function storage_buckets_info(bucket_id)
     local ibuckets = setmetatable({}, { __serialize = 'mapping' })
@@ -2651,6 +2942,73 @@ local function storage_info()
 end
 
 --------------------------------------------------------------------------------
+-- Public API protection
+--------------------------------------------------------------------------------
+
+--
+-- Arguments are listed explicitly instead of '...' because the latter does not
+-- jit.
+--
+local function storage_api_call_safe(func, arg1, arg2, arg3, arg4)
+    return func(arg1, arg2, arg3, arg4)
+end
+
+--
+-- Unsafe proxy is loaded with protections. But it is used rarely and only in
+-- the beginning of instance's lifetime.
+--
+local function storage_api_call_unsafe(func, arg1, arg2, arg3, arg4)
+    -- box.info is quite expensive. Avoid calling it again when the instance
+    -- is finally loaded.
+    if not M.is_loaded then
+        if type(box.cfg) == 'function' then
+            local msg = 'box seems not to be configured'
+            return error(lerror.vshard(lerror.code.STORAGE_IS_DISABLED, msg))
+        end
+        local status = box.info.status
+        -- 'Orphan' is allowed because even if a replica is an orphan, it still
+        -- could be up to date. Just not all other replicas are connected.
+        if status ~= 'running' and status ~= 'orphan' then
+            local msg = ('instance status is "%s"'):format(status)
+            return error(lerror.vshard(lerror.code.STORAGE_IS_DISABLED, msg))
+        end
+        M.is_loaded = true
+    end
+    if not M.is_configured then
+        local msg = 'storage is not configured'
+        return error(lerror.vshard(lerror.code.STORAGE_IS_DISABLED, msg))
+    end
+    if not M.is_enabled then
+        local msg = 'storage is disabled explicitly'
+        return error(lerror.vshard(lerror.code.STORAGE_IS_DISABLED, msg))
+    end
+    M.api_call_cache = storage_api_call_safe
+    return func(arg1, arg2, arg3, arg4)
+end
+
+M.api_call_cache = storage_api_call_unsafe
+
+local function storage_make_api(func)
+    return function(arg1, arg2, arg3, arg4)
+        return M.api_call_cache(func, arg1, arg2, arg3, arg4)
+    end
+end
+
+local function storage_enable()
+    M.is_enabled = true
+end
+
+--
+-- Disable can be used in case the storage entered a critical state in which
+-- requests are not allowed. For instance, its config got broken or too old
+-- compared to a centric config somewhere.
+--
+local function storage_disable()
+    M.is_enabled = false
+    M.api_call_cache = storage_api_call_unsafe
+end
+
+--------------------------------------------------------------------------------
 -- Module definition
 --------------------------------------------------------------------------------
 --
@@ -2676,7 +3034,7 @@ end
 -- (reload is success, if an interpreter came to the 'return'
 -- command).
 --
--- Functions of type 2 can be omited, because outside of a module
+-- Functions of type 2 can be omitted, because outside of a module
 -- they are updated only in a case of successful reload, and
 -- inside of the module they are used only inside functions of the
 -- type 3.
@@ -2720,6 +3078,9 @@ else
         storage_cfg(M.current_cfg, M.this_replica.uuid, true)
     end
     M.module_version = M.module_version + 1
+    -- Background fibers could sleep waiting for bucket changes.
+    -- Let them know it is time to reload.
+    bucket_generation_increment()
 end
 
 M.recovery_f = recovery_f
@@ -2730,7 +3091,7 @@ M.gc_bucket_f = gc_bucket_f
 -- These functions are saved in M not for atomic reload, but for
 -- unit testing.
 --
-M.gc_bucket_step_by_type = gc_bucket_step_by_type
+M.gc_bucket_drop = gc_bucket_drop
 M.rebalancer_build_routes = rebalancer_build_routes
 M.rebalancer_calculate_metrics = rebalancer_calculate_metrics
 M.cached_find_sharded_spaces = find_sharded_spaces
@@ -2742,11 +3103,6 @@ M.route_dispenser = {
     pop = route_dispenser_pop,
     sent = route_dispenser_sent,
 }
-M.rlist = {
-    new = rlist_new,
-    add_tail = rlist_add_tail,
-    remove = rlist_remove,
-}
 M.schema_latest_version = schema_latest_version
 M.schema_current_version = schema_current_version
 M.schema_upgrade_master = schema_upgrade_master
@@ -2754,44 +3110,73 @@ M.schema_upgrade_handlers = schema_upgrade_handlers
 M.schema_version_make = schema_version_make
 M.schema_bootstrap = schema_init_0_1_15_0
 
+M.bucket_are_all_rw = bucket_are_all_rw_public
+M.bucket_generation_wait = bucket_generation_wait
+lregistry.storage = M
+
+--
+-- Not all methods are public here. Private methods should not be exposed if
+-- possible. At least not without notable difference in naming.
+--
 return {
-    sync = sync,
-    bucket_force_create = bucket_force_create,
-    bucket_force_drop = bucket_force_drop,
-    bucket_collect = bucket_collect,
-    bucket_recv = bucket_recv,
-    bucket_send = bucket_send,
-    bucket_stat = bucket_stat,
-    bucket_pin = bucket_pin,
-    bucket_unpin = bucket_unpin,
-    bucket_ref = bucket_ref,
-    bucket_unref = bucket_unref,
-    bucket_refro = bucket_refro,
-    bucket_refrw = bucket_refrw,
-    bucket_unrefro = bucket_unrefro,
-    bucket_unrefrw = bucket_unrefrw,
-    bucket_delete_garbage = bucket_delete_garbage,
-    garbage_collector_wakeup = garbage_collector_wakeup,
-    rebalancer_wakeup = rebalancer_wakeup,
-    rebalancer_apply_routes = rebalancer_apply_routes,
-    rebalancer_disable = rebalancer_disable,
-    rebalancer_enable = rebalancer_enable,
-    is_locked = is_this_replicaset_locked,
-    rebalancing_is_in_progress = rebalancing_is_in_progress,
-    recovery_wakeup = recovery_wakeup,
-    call = storage_call,
-    _call = service_call,
-    cfg = function(cfg, uuid) return storage_cfg(cfg, uuid, false) end,
-    info = storage_info,
-    buckets_info = storage_buckets_info,
-    buckets_count = storage_buckets_count,
-    buckets_discovery = buckets_discovery,
-    rebalancer_request_state = rebalancer_request_state,
-    internal = M,
-    on_master_enable = on_master_enable,
-    on_master_disable = on_master_disable,
-    sharded_spaces = function()
-        return table.deepcopy(find_sharded_spaces())
-    end,
+    --
+    -- Bucket methods.
+    --
+    bucket_force_create = storage_make_api(bucket_force_create),
+    bucket_force_drop = storage_make_api(bucket_force_drop),
+    bucket_collect = storage_make_api(bucket_collect),
+    bucket_recv = storage_make_api(bucket_recv),
+    bucket_send = storage_make_api(bucket_send),
+    bucket_stat = storage_make_api(bucket_stat),
+    bucket_pin = storage_make_api(bucket_pin),
+    bucket_unpin = storage_make_api(bucket_unpin),
+    bucket_ref = storage_make_api(bucket_ref),
+    bucket_unref = storage_make_api(bucket_unref),
+    bucket_refro = storage_make_api(bucket_refro),
+    bucket_refrw = storage_make_api(bucket_refrw),
+    bucket_unrefro = storage_make_api(bucket_unrefro),
+    bucket_unrefrw = storage_make_api(bucket_unrefrw),
+    bucket_delete_garbage = storage_make_api(bucket_delete_garbage),
+    _bucket_delete_garbage = bucket_delete_garbage,
+    buckets_info = storage_make_api(storage_buckets_info),
+    buckets_count = storage_make_api(bucket_count_public),
+    buckets_discovery = storage_make_api(buckets_discovery),
+    --
+    -- Garbage collector.
+    --
+    garbage_collector_wakeup = storage_make_api(garbage_collector_wakeup),
+    --
+    -- Rebalancer.
+    --
+    rebalancer_wakeup = storage_make_api(rebalancer_wakeup),
+    rebalancer_apply_routes = storage_make_api(rebalancer_apply_routes),
+    rebalancer_disable = storage_make_api(rebalancer_disable),
+    rebalancer_enable = storage_make_api(rebalancer_enable),
+    rebalancing_is_in_progress = storage_make_api(rebalancing_is_in_progress),
+    rebalancer_request_state = storage_make_api(rebalancer_request_state),
+    _rebalancer_request_state = rebalancer_request_state,
+    --
+    -- Recovery.
+    --
+    recovery_wakeup = storage_make_api(recovery_wakeup),
+    --
+    -- Instance info.
+    --
+    is_locked = storage_make_api(is_this_replicaset_locked),
+    info = storage_make_api(storage_info),
+    sharded_spaces = storage_make_api(storage_sharded_spaces),
+    _sharded_spaces = storage_sharded_spaces,
     module_version = function() return M.module_version end,
+    --
+    -- Miscellaneous.
+    --
+    call = storage_make_api(storage_call),
+    _call = storage_make_api(service_call),
+    sync = storage_make_api(sync),
+    cfg = function(cfg, uuid) return storage_cfg(cfg, uuid, false) end,
+    on_master_enable = storage_make_api(on_master_enable),
+    on_master_disable = storage_make_api(on_master_disable),
+    enable = storage_enable,
+    disable = storage_disable,
+    internal = M,
 }

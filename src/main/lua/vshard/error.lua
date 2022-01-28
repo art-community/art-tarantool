@@ -4,7 +4,7 @@ local json = require('json')
 --
 -- Error messages description.
 -- * name -- Key by which an error code can be retrieved from
---   the expoted by the module `code` dictionary.
+--   the exported by the module `code` dictionary.
 -- * msg -- Error message which can use `args` using
 --   `string.format` notation.
 -- * args -- Names of arguments passed while constructing an
@@ -20,7 +20,7 @@ local error_message_template = {
     [2] = {
         name = 'NON_MASTER',
         msg = 'Replica %s is not a master for replicaset %s anymore',
-        args = {'replica_uuid', 'replicaset_uuid'}
+        args = {'replica_uuid', 'replicaset_uuid', 'master_uuid'}
     },
     [3] = {
         name = 'BUCKET_ALREADY_EXISTS',
@@ -130,6 +130,46 @@ local error_message_template = {
         name = 'TOO_MANY_RECEIVING',
         msg = 'Too many receiving buckets at once, please, throttle'
     },
+    [26] = {
+        name = 'STORAGE_IS_REFERENCED',
+        msg = 'Storage is referenced'
+    },
+    [27] = {
+        name = 'STORAGE_REF_ADD',
+        msg = 'Can not add a storage ref: %s',
+        args = {'reason'},
+    },
+    [28] = {
+        name = 'STORAGE_REF_USE',
+        msg = 'Can not use a storage ref: %s',
+        args = {'reason'},
+    },
+    [29] = {
+        name = 'STORAGE_REF_DEL',
+        msg = 'Can not delete a storage ref: %s',
+        args = {'reason'},
+    },
+    [30] = {
+        name = 'BUCKET_RECV_DATA_ERROR',
+        msg = 'Can not receive the bucket %s data in space "%s" at tuple %s: %s',
+        args = {'bucket_id', 'space', 'tuple', 'reason'},
+    },
+    [31] = {
+        name = 'MULTIPLE_MASTERS_FOUND',
+        msg = 'Found more than one master in replicaset %s on nodes %s and %s',
+        args = {'replicaset_uuid', 'master1', 'master2'},
+    },
+    [32] = {
+        name = 'REPLICASET_IN_BACKOFF',
+        msg = 'Replicaset %s is in backoff, can\'t take requests right now. '..
+              'Last error was %s',
+        args = {'replicaset_uuid', 'error'}
+    },
+    [33] = {
+        name = 'STORAGE_IS_DISABLED',
+        msg = 'Storage is disabled: %s',
+        args = {'reason'}
+    },
 }
 
 --
@@ -149,7 +189,7 @@ end
 --   oom error, socket error etc. It has type = one of tarantool
 --   error types, trace (file, line), message;
 -- * vshard_error - it is created on sharding errors like
---   replicaset unavailability, master absense etc. It has type =
+--   replicaset unavailability, master absence etc. It has type =
 --   'ShardingError', one of codes below and optional
 --   message.
 --
@@ -204,6 +244,24 @@ local function make_error(e)
     end
 end
 
+--
+-- Restore an error object from its string serialization.
+--
+local function from_string(str)
+    -- Error objects in VShard are stringified into json. Hence can restore also
+    -- as json. The only problem is that the json might be truncated if it was
+    -- stored in an error message of a real error object. It is not very
+    -- reliable.
+    local ok, res = pcall(json.decode, str)
+    if not ok then
+        return nil
+    end
+    if type(res) ~= 'table' or type(res.type) ~= 'string' or
+       type(res.code) ~= 'number' or type(res.message) ~= 'string' then
+        return nil
+    end
+    return make_error(res)
+end
 
 local function make_alert(code, ...)
     local format = error_message_template[code]
@@ -212,10 +270,21 @@ local function make_alert(code, ...)
     return setmetatable(r, { __serialize = 'seq' })
 end
 
+--
+-- Create a timeout error object. Box.error.new() can't be used because is
+-- present only since 1.10.
+--
+local function make_timeout()
+    local _, err = pcall(box.error, box.error.TIMEOUT)
+    return make_error(err)
+end
+
 return {
     code = error_code,
     box = box_error,
     vshard = vshard_error,
     make = make_error,
+    from_string = from_string,
     alert = make_alert,
+    timeout = make_timeout,
 }

@@ -13,6 +13,8 @@
 --             weight = number,
 --             down_ts = <timestamp of disconnect from the
 --                        replica>,
+--             backoff_ts = <timestamp when was sent into backoff state>,
+--             backoff_err = <error object caused the backoff>,
 --             net_timeout = <current network timeout for calls,
 --                            doubled on each network fail until
 --                            max value, and reset to minimal
@@ -25,6 +27,10 @@
 --          }
 --      },
 --      master = <master server from the array above>,
+--      master_cond = <condition variable signaled when the replicaset finds or
+--                     changes its master>,
+--      is_auto_master = <true when is configured to find the master on
+--                        its own>,
 --      replica = <nearest available replica object>,
 --      balance_i = <index of a next replica in priority_list to
 --                   use for a load-balanced request>,
@@ -54,6 +60,9 @@ local luri = require('uri')
 local luuid = require('uuid')
 local ffi = require('ffi')
 local util = require('vshard.util')
+local fiber_clock = fiber.clock
+local fiber_yield = fiber.yield
+local fiber_cond_wait = util.fiber_cond_wait
 local gsc = util.generate_self_checker
 
 --
@@ -85,10 +94,10 @@ local function netbox_on_connect(conn)
     end
     if replica == rs.replica and replica == rs.priority_list[1] then
         -- Update replica_up_ts, if the current replica has the
-        -- biggest priority. Really, it is not neccessary to
+        -- biggest priority. Really, it is not necessary to
         -- increase replica connection priority, if the current
         -- one already has the biggest priority. (See failover_f).
-        rs.replica_up_ts = fiber.time()
+        rs.replica_up_ts = fiber_clock()
     end
 end
 
@@ -100,7 +109,58 @@ local function netbox_on_disconnect(conn)
     assert(conn.replica)
     -- Replica is down - remember this time to decrease replica
     -- priority after FAILOVER_DOWN_TIMEOUT seconds.
-    conn.replica.down_ts = fiber.time()
+    conn.replica.down_ts = fiber_clock()
+end
+
+--
+-- Wait until the connection is established. This is necessary at least for
+-- async requests because they fail immediately if the connection is not done.
+-- Returns the remaining timeout because is expected to be used to connect to
+-- many instances in a loop, where such return saves one clock get in the caller
+-- code and is just cleaner code.
+--
+local function netbox_wait_connected(conn, timeout)
+    -- Fast path. Usually everything is connected.
+    if conn:is_connected() then
+        return timeout
+    end
+    local deadline = fiber_clock() + timeout
+    -- Loop against spurious wakeups.
+    repeat
+        -- Netbox uses fiber_cond inside, which throws an irrelevant usage error
+        -- at negative timeout. Need to check the case manually.
+        if timeout < 0 then
+            return nil, lerror.timeout()
+        end
+        local ok, res = pcall(conn.wait_connected, conn, timeout)
+        if not ok then
+            return nil, lerror.make(res)
+        end
+        if not res then
+            return nil, lerror.timeout()
+        end
+        timeout = deadline - fiber_clock()
+    until conn:is_connected()
+    return timeout
+end
+
+--
+-- Check if the replica is not in backoff. It also serves as an update - if the
+-- replica still has an old backoff timestamp, it is cleared. This way of
+-- backoff update does not require any fibers to perform background updates.
+-- Hence works not only on the router.
+--
+local function replica_check_backoff(replica, now)
+    if not replica.backoff_ts then
+        return true
+    end
+    if replica.backoff_ts + consts.REPLICA_BACKOFF_INTERVAL > now then
+        return false
+    end
+    log.warn('Replica %s returns from backoff', replica.uuid)
+    replica.backoff_ts = nil
+    replica.backoff_err = nil
+    return true
 end
 
 --
@@ -126,6 +186,26 @@ local function replicaset_connect_to_replica(replicaset, replica)
     return conn
 end
 
+local function replicaset_wait_master(replicaset, timeout)
+    local master = replicaset.master
+    -- Fast path - master is almost always known.
+    if master then
+        return master, timeout
+    end
+    -- Slow path.
+    local deadline = fiber_clock() + timeout
+    repeat
+        if not replicaset.is_auto_master or
+           not fiber_cond_wait(replicaset.master_cond, timeout) then
+            return nil, lerror.vshard(lerror.code.MISSING_MASTER,
+                                      replicaset.uuid)
+        end
+        timeout = deadline - fiber_clock()
+        master = replicaset.master
+    until master
+    return master, timeout
+end
+
 --
 -- Create net.box connection to master.
 --
@@ -136,6 +216,19 @@ local function replicaset_connect_master(replicaset)
                                   replicaset.uuid)
     end
     return replicaset_connect_to_replica(replicaset, master)
+end
+
+--
+-- Wait until the master instance is connected.
+--
+local function replicaset_wait_connected(replicaset, timeout)
+    local master
+    master, timeout = replicaset_wait_master(replicaset, timeout)
+    if not master then
+        return nil, timeout
+    end
+    local conn = replicaset_connect_to_replica(replicaset, master)
+    return netbox_wait_connected(conn, timeout)
 end
 
 --
@@ -174,7 +267,7 @@ local function replicaset_up_replica_priority(replicaset)
     local old_replica = replicaset.replica
     if old_replica == replicaset.priority_list[1] and
        old_replica:is_connected() then
-        replicaset.replica_up_ts = fiber.time()
+        replicaset.replica_up_ts = fiber_clock()
         return
     end
     for _, replica in pairs(replicaset.priority_list) do
@@ -254,9 +347,21 @@ local function replica_call(replica, func, args, opts)
         if opts.timeout >= replica.net_timeout then
             replica_on_failed_request(replica)
         end
+        local err = storage_status
+        -- VShard functions can throw exceptions using error() function. When
+        -- it reaches the network layer, it is wrapped into LuajitError. Try to
+        -- extract the original error if this is the case. Not always is
+        -- possible - the string representation could be truncated.
+        --
+        -- In old Tarantool versions LuajitError turned into ClientError on the
+        -- client. Check both types.
+        if func:startswith('vshard.') and (err.type == 'LuajitError' or
+           err.type == 'ClientError') then
+            err = lerror.from_string(err.message) or err
+        end
         log.error("Exception during calling '%s' on '%s': %s", func, replica,
-                  storage_status)
-        return false, nil, lerror.make(storage_status)
+                  err)
+        return false, nil, lerror.make(err)
     else
         replica_on_success_request(replica)
     end
@@ -305,18 +410,30 @@ local function replicaset_master_call(replicaset, func, args, opts)
     assert(opts == nil or type(opts) == 'table')
     assert(type(func) == 'string', 'function name')
     assert(args == nil or type(args) == 'table', 'function arguments')
-    local conn, err = replicaset_connect_master(replicaset)
-    if not conn then
-        return nil, err
+    local master = replicaset.master
+    if not master then
+        opts = opts and table.copy(opts) or {}
+        if opts.is_async then
+            return nil, lerror.vshard(lerror.code.MISSING_MASTER,
+                                      replicaset.uuid)
+        end
+        local timeout = opts.timeout or consts.MASTER_SEARCH_TIMEOUT
+        master, timeout = replicaset_wait_master(replicaset, timeout)
+        if not master then
+            return nil, timeout
+        end
+        opts.timeout = master.net_timeout
+    else
+        if not opts then
+            opts = {timeout = master.net_timeout}
+        elseif not opts.timeout then
+            opts = table.copy(opts)
+            opts.timeout = master.net_timeout
+        end
     end
-    if not opts then
-        opts = {timeout = replicaset.master.net_timeout}
-    elseif not opts.timeout then
-        opts = table.copy(opts)
-        opts.timeout = replicaset.master.net_timeout
-    end
+    replicaset_connect_to_replica(replicaset, master)
     local net_status, storage_status, retval, error_object =
-        replica_call(replicaset.master, func, args, opts)
+        replica_call(master, func, args, opts)
     -- Ignore net_status - master does not retry requests.
     return storage_status, retval, error_object
 end
@@ -338,6 +455,42 @@ local function can_retry_after_error(e)
 end
 
 --
+-- True if after the given error on call of the given function the connection
+-- must go into backoff.
+--
+local function can_backoff_after_error(e, func)
+    if not e then
+        return false
+    end
+    if type(e) ~= 'table' and
+       (type(e) ~= 'cdata' or not ffi.istype('struct error', e)) then
+        return false
+    end
+    -- So far it is enabled only for vshard's own functions. Including
+    -- vshard.storage.call(). Otherwise it is not possible to retry safely -
+    -- user's function could have side effects before raising that error.
+    -- For instance, 'access denied' could be raised by user's function
+    -- internally after it already changed some data on the storage.
+    if not func:startswith('vshard.') then
+        return false
+    end
+    -- ClientError is sent for all errors by old Tarantool versions which didn't
+    -- keep error type. New versions preserve the original error type.
+    if e.type == 'ClientError' or e.type == 'AccessDeniedError' then
+        if e.code == box.error.ACCESS_DENIED then
+            return e.message:startswith("Execute access to function 'vshard.")
+        end
+        if e.code == box.error.NO_SUCH_PROC then
+            return e.message:startswith("Procedure 'vshard.")
+        end
+    end
+    if e.type == 'ShardingError' then
+        return e.code == lerror.code.STORAGE_IS_DISABLED
+    end
+    return false
+end
+
+--
 -- Pick a next replica according to round-robin load balancing
 -- policy.
 --
@@ -352,14 +505,14 @@ end
 
 --
 -- Template to implement a function able to visit multiple
--- replicas with certain details. One of applicatinos - a function
+-- replicas with certain details. One of applications - a function
 -- making a call on a nearest available replica. It is possible
 -- for 'read' requests only. And if the nearest replica is not
 -- available now, then use master's connection - we can not wait
 -- until failover fiber will repair the nearest connection.
 --
 local function replicaset_template_multicallro(prefer_replica, balance)
-    local function pick_next_replica(replicaset)
+    local function pick_next_replica(replicaset, now)
         local r
         local master = replicaset.master
         if balance then
@@ -367,29 +520,34 @@ local function replicaset_template_multicallro(prefer_replica, balance)
             while i > 0 do
                 r = replicaset_balance_replica(replicaset)
                 i = i - 1
-                if r:is_connected() and (not prefer_replica or r ~= master) then
+                if r:is_connected() and (not prefer_replica or r ~= master) and
+                   replica_check_backoff(r, now) then
                     return r
                 end
             end
-        elseif prefer_replica then
-            r = replicaset.replica
+        else
+            local start_r = replicaset.replica
+            r = start_r
             while r do
-                if r:is_connected() and r ~= master then
+                if r:is_connected() and (not prefer_replica or r ~= master) and
+                   replica_check_backoff(r, now) then
                     return r
                 end
                 r = r.next_by_priority
             end
-        else
-            r = replicaset.replica
-            if r and r:is_connected() then
-                return r
+            -- Iteration above could start not from the best prio replica.
+            -- Check the beginning of the list too.
+            for _, r in ipairs(replicaset.priority_list) do
+                if r == start_r then
+                    -- Reached already checked part.
+                    break
+                end
+                if r:is_connected() and (not prefer_replica or r ~= master) and
+                   replica_check_backoff(r, now) then
+                    return r
+                end
             end
         end
-        local conn, err = replicaset_connect_master(replicaset)
-        if not conn then
-            return nil, err
-        end
-        return master
     end
 
     return function(replicaset, func, args, opts)
@@ -400,25 +558,45 @@ local function replicaset_template_multicallro(prefer_replica, balance)
         local timeout = opts.timeout or consts.CALL_TIMEOUT_MAX
         local net_status, storage_status, retval, err, replica
         if timeout <= 0 then
-            net_status, err = pcall(box.error, box.error.TIMEOUT)
-            return nil, lerror.make(err)
+            return nil, lerror.timeout()
         end
-        local end_time = fiber.time() + timeout
+        local now = fiber_clock()
+        local end_time = now + timeout
         while not net_status and timeout > 0 do
-            replica, err = pick_next_replica(replicaset)
+            replica = pick_next_replica(replicaset, now)
             if not replica then
-                return nil, err
+                replica, timeout = replicaset_wait_master(replicaset, timeout)
+                if not replica then
+                    return nil, timeout
+                end
+                replicaset_connect_to_replica(replicaset, replica)
+                if replica.backoff_ts then
+                    return nil, lerror.vshard(
+                        lerror.code.REPLICASET_IN_BACKOFF, replicaset.uuid,
+                        replica.backoff_err)
+                end
             end
             opts.timeout = timeout
             net_status, storage_status, retval, err =
                 replica_call(replica, func, args, opts)
-            timeout = end_time - fiber.time()
+            now = fiber_clock()
+            timeout = end_time - now
             if not net_status and not storage_status and
                not can_retry_after_error(retval) then
-                -- There is no sense to retry LuaJit errors, such as
-                -- assetions, not defined variables etc.
-                net_status = true
-                break
+                if can_backoff_after_error(retval, func) then
+                    if not replica.backoff_ts then
+                        log.warn('Replica %s goes into backoff for %s sec '..
+                                 'after error %s', replica.uuid,
+                                 consts.REPLICA_BACKOFF_INTERVAL, retval)
+                        replica.backoff_ts = now
+                        replica.backoff_err = retval
+                    end
+                else
+                    -- There is no sense to retry LuaJit errors, such as
+                    -- assertions, undefined variables etc.
+                    net_status = true
+                    break
+                end
             end
         end
         if not net_status then
@@ -460,6 +638,8 @@ local function rebind_replicasets(replicasets, old_replicasets)
                 local conn = old_replica.conn
                 replica.conn = conn
                 replica.down_ts = old_replica.down_ts
+                replica.backoff_ts = old_replica.backoff_ts
+                replica.backoff_err = old_replica.backoff_err
                 replica.net_timeout = old_replica.net_timeout
                 replica.net_sequential_ok = old_replica.net_sequential_ok
                 replica.net_sequential_fail = old_replica.net_sequential_fail
@@ -469,7 +649,201 @@ local function rebind_replicasets(replicasets, old_replicasets)
                 end
             end
         end
+        if old_replicaset then
+            -- Take a hint from the old replicaset who is the master now.
+            if replicaset.is_auto_master then
+                local master = old_replicaset.master
+                if master then
+                    replicaset.master = replicaset.replicas[master.uuid]
+                end
+            end
+            -- Stop waiting for master in the old replicaset. Its running
+            -- requests won't find it anyway. Auto search works only for the
+            -- most actual replicaset objects.
+            if old_replicaset.is_auto_master then
+                old_replicaset.is_auto_master = false
+                old_replicaset.master_cond:broadcast()
+            end
+        end
     end
+end
+
+--
+-- Let the replicaset know @a old_master_uuid is not a master anymore, should
+-- use @a candidate_uuid instead.
+-- Returns whether the request, which brought this information, can be retried.
+--
+local function replicaset_update_master(replicaset, old_master_uuid,
+                                        candidate_uuid)
+    local is_auto = replicaset.is_auto_master
+    local replicaset_uuid = replicaset.uuid
+    if old_master_uuid == candidate_uuid then
+        -- It should not happen ever, but be ready to everything.
+        log.warn('Replica %s in replicaset %s reports self as both master '..
+                 'and not master', old_master_uuid, replicaset_uuid)
+        return is_auto
+    end
+    local master = replicaset.master
+    if not master then
+        if not is_auto or not candidate_uuid then
+            return is_auto
+        end
+        local candidate = replicaset.replicas[candidate_uuid]
+        if not candidate then
+            return true
+        end
+        replicaset.master = candidate
+        log.info('Replica %s becomes a master as reported by %s for '..
+                 'replicaset %s', candidate_uuid, old_master_uuid,
+                 replicaset_uuid)
+        return true
+    end
+    local master_uuid = master.uuid
+    if master_uuid ~= old_master_uuid then
+        -- Master was changed while the master update information was coming.
+        -- It means it is outdated and should be ignored.
+        -- Return true regardless of the auto-master config. Because the master
+        -- change means the caller's request has a chance to succeed on the new
+        -- master on retry.
+        return true
+    end
+    if not is_auto then
+        log.warn('Replica %s is not master for replicaset %s anymore, please '..
+                 'update configuration', master_uuid, replicaset_uuid)
+        return false
+    end
+    if not candidate_uuid then
+        replicaset.master = nil
+        log.warn('Replica %s is not a master anymore for replicaset %s, no '..
+                 'candidate was reported', master_uuid, replicaset_uuid)
+        return true
+    end
+    local candidate = replicaset.replicas[candidate_uuid]
+    if candidate then
+        replicaset.master = candidate
+        log.info('Replica %s becomes master instead of %s for replicaset %s',
+                 candidate_uuid, master_uuid, replicaset_uuid)
+    else
+        replicaset.master = nil
+        log.warn('Replica %s is not a master anymore for replicaset %s, new '..
+                 'master %s could not be found in the config',
+                 master_uuid, replicaset_uuid, candidate_uuid)
+    end
+    return true
+end
+
+--
+-- Check if the master is still master, and find a new master if there is no a
+-- known one.
+--
+local function replicaset_locate_master(replicaset)
+    local is_done = true
+    local is_nop = true
+    if not replicaset.is_auto_master then
+        return is_done, is_nop
+    end
+    local func = 'vshard.storage._call'
+    local args = {'info'}
+    local const_timeout = consts.MASTER_SEARCH_TIMEOUT
+    local ok, res, err, f
+    local master = replicaset.master
+    if master then
+        local sync_opts = {timeout = const_timeout}
+        ok, res, err = replica_call(master, func, args, sync_opts)
+        if not ok then
+            return is_done, is_nop, err
+        end
+        if res.is_master then
+            return is_done, is_nop
+        end
+        -- Could be changed during the call from the outside. For
+        -- instance, by a failed request with a hint from the old
+        -- master.
+        local cur_master = replicaset.master
+        if cur_master == master then
+            log.info('Master of replicaset %s, node %s, has resigned. Trying '..
+                     'to find a new one', replicaset.uuid, master.uuid)
+            replicaset.master = nil
+        elseif cur_master then
+            -- Another master was already found. But check it via another call
+            -- later to avoid an infinite loop here.
+            return is_done, is_nop
+        end
+    end
+    is_nop = false
+
+    local last_err
+    local futures = {}
+    local timeout = const_timeout
+    local deadline = fiber_clock() + timeout
+    local async_opts = {is_async = true}
+    local replicaset_uuid = replicaset.uuid
+    for replica_uuid, replica in pairs(replicaset.replicas) do
+        local conn = replica.conn
+        if conn:is_connected() then
+            ok, f = pcall(conn.call, conn, func, args, async_opts)
+            if not ok then
+                last_err = lerror.make(f)
+            else
+                futures[replica_uuid] = f
+            end
+        end
+    end
+    local master_uuid
+    for replica_uuid, f in pairs(futures) do
+        if timeout < 0 then
+            -- Netbox uses cond var inside, whose wait throws an error when gets
+            -- a negative timeout. Avoid that.
+            -- Even if the timeout has expired, still walk though the futures
+            -- hoping for a chance that some of them managed to finish and bring
+            -- a sign of a master.
+            timeout = 0
+        end
+        res, err = f:wait_result(timeout)
+        timeout = deadline - fiber_clock()
+        if not res then
+            f:discard()
+            last_err = err
+            goto next_wait
+        end
+        res = res[1]
+        if not res.is_master then
+            goto next_wait
+        end
+        if not master_uuid then
+            master_uuid = replica_uuid
+            goto next_wait
+        end
+        is_done = false
+        last_err = lerror.vshard(lerror.code.MULTIPLE_MASTERS_FOUND,
+                                 replicaset_uuid, master_uuid, replica_uuid)
+        do return is_done, is_nop, last_err end
+        ::next_wait::
+    end
+    master = replicaset.replicas[master_uuid]
+    if master then
+        log.info('Found master for replicaset %s: %s', replicaset_uuid,
+                 master_uuid)
+        replicaset.master = master
+        replicaset.master_cond:broadcast()
+    else
+        is_done = false
+    end
+    return is_done, is_nop, last_err
+end
+
+local function locate_masters(replicasets)
+    local is_all_done = true
+    local is_all_nop = true
+    local last_err
+    for _, replicaset in pairs(replicasets) do
+        local is_done, is_nop, err = replicaset_locate_master(replicaset)
+        is_all_done = is_all_done and is_done
+        is_all_nop = is_all_nop and is_nop
+        last_err = err or last_err
+        fiber_yield()
+    end
+    return is_all_done, is_all_nop, last_err
 end
 
 --
@@ -483,12 +857,14 @@ local replicaset_mt = {
         connect_replica = replicaset_connect_to_replica;
         down_replica_priority = replicaset_down_replica_priority;
         up_replica_priority = replicaset_up_replica_priority;
+        wait_connected = replicaset_wait_connected,
         call = replicaset_master_call;
         callrw = replicaset_master_call;
         callro = replicaset_template_multicallro(false, false);
         callbro = replicaset_template_multicallro(false, true);
         callre = replicaset_template_multicallro(true, false);
         callbre = replicaset_template_multicallro(true, true);
+        update_master = replicaset_update_master,
     };
     __tostring = replicaset_tostring;
 }
@@ -680,7 +1056,7 @@ local function buildall(sharding_cfg)
     else
         zone_weights = {}
     end
-    local curr_ts = fiber.time()
+    local curr_ts = fiber_clock()
     for replicaset_uuid, replicaset in pairs(sharding_cfg.sharding) do
         local new_replicaset = setmetatable({
             replicas = {},
@@ -689,6 +1065,8 @@ local function buildall(sharding_cfg)
             bucket_count = 0,
             lock = replicaset.lock,
             balance_i = 1,
+            is_auto_master = replicaset.master == 'auto',
+            master_cond = fiber.cond(),
         }, replicaset_mt)
         local priority_list = {}
         for replica_uuid, replica in pairs(replicaset.replicas) do
@@ -699,7 +1077,7 @@ local function buildall(sharding_cfg)
                 uri = replica.uri, name = replica.name, uuid = replica_uuid,
                 zone = replica.zone, net_timeout = consts.CALL_TIMEOUT_MIN,
                 net_sequential_ok = 0, net_sequential_fail = 0,
-                down_ts = curr_ts,
+                down_ts = curr_ts, backoff_ts = nil, backoff_err = nil,
             }, replica_mt)
             new_replicaset.replicas[replica_uuid] = new_replica
             if replica.master then
@@ -762,4 +1140,5 @@ return {
     wait_masters_connect = wait_masters_connect,
     rebind_replicasets = rebind_replicasets,
     outdate_replicasets = outdate_replicasets,
+    locate_masters = locate_masters,
 }

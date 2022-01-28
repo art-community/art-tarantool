@@ -2,6 +2,7 @@
 
 local log = require('log')
 local luri = require('uri')
+local lutil = require('vshard.util')
 local consts = require('vshard.consts')
 
 local function check_uri(uri)
@@ -10,13 +11,23 @@ local function check_uri(uri)
     end
 end
 
-local function check_master(master, ctx)
+local function check_replica_master(master, ctx)
     if master then
         if ctx.master then
             error('Only one master is allowed per replicaset')
         else
             ctx.master = master
         end
+    end
+end
+
+local function check_replicaset_master(master, ctx)
+    -- Limit the version due to extensive usage of netbox is_async feature.
+    if not lutil.version_is_at_least(1, 10, 1) then
+        error('Only versions >= 1.10.1 support master discovery')
+    end
+    if master ~= 'auto' then
+        error('Only "auto" master is supported')
     end
 end
 
@@ -59,7 +70,17 @@ local function validate_config(config, template, check_arg)
         local value = config[key]
         local name = template_value.name
         local expected_type = template_value.type
-        if value == nil then
+        if template_value.is_deprecated then
+            if value ~= nil then
+                local reason = template_value.reason
+                if reason then
+                    reason = '. '..reason
+                else
+                    reason = ''
+                end
+                log.warn('Option "%s" is deprecated'..reason, name)
+            end
+        elseif value == nil then
             if not template_value.is_optional then
                 error(string.format('%s must be specified', name))
             else
@@ -101,8 +122,8 @@ local replica_template = {
     name = {type = 'string', name = "Name", is_optional = true},
     zone = {type = {'string', 'number'}, name = "Zone", is_optional = true},
     master = {
-        type = 'boolean', name = "Master", is_optional = true, default = false,
-        check = check_master
+        type = 'boolean', name = "Master", is_optional = true,
+        check = check_replica_master
     },
 }
 
@@ -120,6 +141,10 @@ local replicaset_template = {
         default = 1,
     },
     lock = {type = 'boolean', name = 'Lock', is_optional = true},
+    master = {
+        type = 'string', name = 'Master search mode', is_optional = true,
+        check = check_replicaset_master
+    },
 }
 
 --
@@ -130,7 +155,7 @@ local function cfg_check_weights(weights)
         if type(zone1) ~= 'number' and type(zone1) ~= 'string' then
             -- Zone1 can be not number or string, if an user made
             -- this: weights = {[{1}] = ...}. In such a case
-            -- {1} is the unaccassible key of a lua table, which
+            -- {1} is the unaccessible key of a lua table, which
             -- is available only via pairs.
             error('Zone identifier must be either string or number')
         end
@@ -175,6 +200,7 @@ local function check_sharding(sharding)
             error('Replicaset weight can not be Inf')
         end
         validate_config(replicaset, replicaset_template)
+        local is_auto_master = replicaset.master == 'auto'
         for replica_uuid, replica in pairs(replicaset.replicas) do
             if uris[replica.uri] then
                 error(string.format('Duplicate uri %s', replica.uri))
@@ -184,6 +210,12 @@ local function check_sharding(sharding)
                 error(string.format('Duplicate uuid %s', replica_uuid))
             end
             uuids[replica_uuid] = true
+            if is_auto_master and replica.master ~= nil then
+                error(string.format('Can not specify master nodes when '..
+                                    'master search is enabled, but found '..
+                                    'master flag in replica uuid %s',
+                                    replica_uuid))
+            end
             -- Log warning in case replica.name duplicate is
             -- found. Message appears once for each unique
             -- duplicate.
@@ -241,9 +273,8 @@ local cfg_template = {
         max = consts.REBALANCER_MAX_SENDING_MAX
     },
     collect_bucket_garbage_interval = {
-        type = 'positive number', name = 'Garbage bucket collect interval',
-        is_optional = true,
-        default = consts.DEFAULT_COLLECT_BUCKET_GARBAGE_INTERVAL
+        name = 'Garbage bucket collect interval', is_deprecated = true,
+        reason = 'Has no effect anymore'
     },
     collect_lua_garbage = {
         type = 'boolean', name = 'Garbage Lua collect necessity',
@@ -264,6 +295,14 @@ local cfg_template = {
     discovery_mode = {
         type = 'string', name = 'Discovery mode: on, off, once',
         is_optional = true, default = 'on', check = check_discovery_mode
+    },
+    sched_ref_quota = {
+        name = 'Scheduler storage ref quota', type = 'non-negative number',
+        is_optional = true, default = consts.DEFAULT_SCHED_REF_QUOTA
+    },
+    sched_move_quota = {
+        name = 'Scheduler bucket move quota', type = 'non-negative number',
+        is_optional = true, default = consts.DEFAULT_SCHED_MOVE_QUOTA
     },
 }
 

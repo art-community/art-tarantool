@@ -1,6 +1,7 @@
 local log = require('log')
 local lfiber = require('fiber')
 local table_new = require('table.new')
+local fiber_clock = lfiber.clock
 
 local MODULE_INTERNALS = '__module_vshard_router'
 -- Reload requirements, in case this module is reloaded manually.
@@ -32,6 +33,7 @@ if not M then
             ERRINJ_FAILOVER_CHANGE_CFG = false,
             ERRINJ_RELOAD = false,
             ERRINJ_LONG_DISCOVERY = false,
+            ERRINJ_MASTER_SEARCH_DELAY = false,
         },
         -- Dictionary, key is router name, value is a router.
         routers = {},
@@ -43,6 +45,11 @@ if not M then
         module_version = 0,
         -- Number of router which require collecting lua garbage.
         collect_lua_garbage_cnt = 0,
+
+        ----------------------- Map-Reduce -----------------------
+        -- Storage Ref ID. It must be unique for each ref request
+        -- and therefore is global and monotonically growing.
+        ref_id = 0,
     }
 end
 
@@ -62,6 +69,8 @@ local ROUTER_TEMPLATE = {
         replicasets = nil,
         -- Fiber to maintain replica connections.
         failover_fiber = nil,
+        -- Fiber to watch for master changes and find new masters.
+        master_search_fiber = nil,
         -- Fiber to discovery buckets in background.
         discovery_fiber = nil,
         -- How discovery works. On - work infinitely. Off - no
@@ -163,7 +172,8 @@ local function bucket_discovery(router, bucket_id)
             replicaset:callrw('vshard.storage.bucket_stat', {bucket_id})
         if err == nil then
             return bucket_set(router, bucket_id, replicaset.uuid)
-        elseif err.code ~= lerror.code.WRONG_BUCKET then
+        elseif err.code ~= lerror.code.WRONG_BUCKET and
+               err.code ~= lerror.code.REPLICASET_IN_BACKOFF then
             last_err = err
             unreachable_uuid = uuid
         end
@@ -461,6 +471,114 @@ end
 -- API
 --------------------------------------------------------------------------------
 
+local function vshard_future_tostring(self)
+    return 'vshard.net.box.request'
+end
+
+local function vshard_future_serialize(self)
+    -- Drop the metatable. It is also copied and if returned as is leads to
+    -- recursive serialization.
+    local s = setmetatable(table.deepcopy(self), {})
+    s._base = nil
+    return s
+end
+
+local function vshard_future_is_ready(self)
+    return self._base:is_ready()
+end
+
+local function vshard_future_wrap_result(res)
+    local storage_ok, res, err = res[1], res[2], res[3]
+    if storage_ok then
+        if res == nil and err ~= nil then
+            return nil, lerror.make(err)
+        end
+        return setmetatable({res}, seq_serializer)
+    end
+    return nil, lerror.make(res)
+end
+
+local function vshard_future_result(self)
+    local res, err = self._base:result()
+    if res == nil then
+        return nil, lerror.make(err)
+    end
+    return vshard_future_wrap_result(res)
+end
+
+local function vshard_future_wait_result(self, timeout)
+    local res, err = self._base:wait_result(timeout)
+    if res == nil then
+        return nil, lerror.make(err)
+    end
+    return vshard_future_wrap_result(res)
+end
+
+local function vshard_future_discard(self)
+    return self._base:discard()
+end
+
+local function vshard_future_iter_next(iter, i)
+    local res, err
+    local base_next = iter.base_next
+    local base_req = iter.base_req
+    local base = iter.base
+    -- Need to distinguish the last response from the pushes. Because the former
+    -- has metadata returned by vshard.storage.call().
+    -- At the same time there is no way to check if the base pairs() did its
+    -- last iteration except calling its next() function again.
+    -- This, in turn, might lead to a block if the result is not ready yet.
+    i, res = base_next(base, i)
+    -- To avoid that there is a 2-phase check.
+    -- If the request isn't finished after first next(), it means the result is
+    -- not received. This is a push. Return as is.
+    -- If the request is finished, it is safe to call next() again to check if
+    -- it ended. It won't block.
+    local is_done = base_req:is_ready()
+
+    if not is_done then
+        -- Definitely a push. It would be finished if the final result was
+        -- received.
+        if i == nil then
+            return nil, lerror.make(res)
+        end
+        return i, res
+    end
+    if i == nil then
+        if res ~= nil then
+            return i, lerror.make(res)
+        end
+        return nil, nil
+    end
+    -- Will not block because the request is already finished.
+    if base_next(base, i) == nil then
+        res, err = vshard_future_wrap_result(res)
+        if res ~= nil then
+            return i, res
+        end
+        return i, {nil, lerror.make(err)}
+    end
+    return i, res
+end
+
+local function vshard_future_pairs(self, timeout)
+    local next_f, iter, i = self._base:pairs(timeout)
+    return vshard_future_iter_next,
+           {base = iter, base_req = self, base_next = next_f}, i
+end
+
+local vshard_future_mt = {
+    __tostring = vshard_future_tostring,
+    __serialize = vshard_future_serialize,
+    __index = {
+        is_ready = vshard_future_is_ready,
+        result = vshard_future_result,
+        wait_result = vshard_future_wait_result,
+        discard = vshard_future_discard,
+        pairs = vshard_future_pairs,
+    }
+}
+
 --
 -- Since 1.10 netbox supports flag 'is_async'. Given this flag, a
 -- request result is returned immediately in a form of a future
@@ -473,41 +591,9 @@ end
 -- So vshard.router.call should wrap a future object with its own
 -- unpacker of result.
 --
--- Unpack a result given from a future object from
--- vshard.storage.call. If future returns [status, result, ...]
--- this function returns [result]. Or a classical couple
--- nil, error.
---
-function future_storage_call_result(self)
-    local res, err = self:base_result()
-    if not res then
-        return nil, err
-    end
-    local storage_call_status, call_status, call_error = unpack(res)
-    if storage_call_status then
-        if call_status == nil and call_error ~= nil then
-            return call_status, call_error
-        else
-            return setmetatable({call_status}, seq_serializer)
-        end
-    end
-    return nil, call_status
-end
-
---
--- Given a netbox future object, redefine its 'result' method.
--- It is impossible to just create a new signle metatable per
--- the module as a copy of original future's one because it has
--- some upvalues related to the netbox connection.
---
-local function wrap_storage_call_future(future)
-    -- Base 'result' below is got from __index metatable under the
-    -- hood. But __index is used only when a table has no such a
-    -- member in itself. So via adding 'result' as a member to a
-    -- future object its __index.result can be redefined.
-    future.base_result = future.result
-    future.result = future_storage_call_result
-    return future
+local function vshard_future_new(future)
+    -- Use '_' as a prefix so as users could use all normal names.
+    return setmetatable({_base = future}, vshard_future_mt)
 end
 
 -- Perform shard operation
@@ -527,7 +613,7 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
     end
     local timeout = opts.timeout or consts.CALL_TIMEOUT_MIN
     local replicaset, err
-    local tend = lfiber.time() + timeout
+    local tend = fiber_clock() + timeout
     if bucket_id > router.total_bucket_count or bucket_id <= 0 then
         error('Bucket is unreachable: bucket id is out of range')
     end
@@ -551,7 +637,7 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
         replicaset, err = bucket_resolve(router, bucket_id)
         if replicaset then
 ::replicaset_is_found::
-            opts.timeout = tend - lfiber.time()
+            opts.timeout = tend - fiber_clock()
             local storage_call_status, call_status, call_error =
                 replicaset[call](replicaset, 'vshard.storage.call',
                                  {bucket_id, mode, func, args}, opts)
@@ -565,7 +651,7 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
                     -- values: true/false and func result. But
                     -- async returns future object. No true/false
                     -- nor func result. So return the first value.
-                    return wrap_storage_call_future(storage_call_status)
+                    return vshard_future_new(storage_call_status)
                 end
             end
             err = lerror.make(call_status)
@@ -583,7 +669,7 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
                         -- if reconfiguration had been started,
                         -- and while is not executed on router,
                         -- but already is executed on storages.
-                        while lfiber.time() <= tend do
+                        while fiber_clock() <= tend do
                             lfiber.sleep(0.05)
                             replicaset = router.replicasets[err.destination]
                             if replicaset then
@@ -598,7 +684,7 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
                         -- case of broken cluster, when a bucket
                         -- is sent on two replicasets to each
                         -- other.
-                        if replicaset and lfiber.time() <= tend then
+                        if replicaset and fiber_clock() <= tend then
                             goto replicaset_is_found
                         end
                     end
@@ -612,23 +698,21 @@ local function router_call_impl(router, bucket_id, mode, prefer_replica,
                 bucket_reset(router, bucket_id)
                 return nil, err
             elseif err.code == lerror.code.NON_MASTER then
-                -- Same, as above - do not wait and repeat.
                 assert(mode == 'write')
-                log.warn("Replica %s is not master for replicaset %s anymore,"..
-                         "please update configuration!",
-                          replicaset.master.uuid, replicaset.uuid)
-                return nil, err
+                if not replicaset:update_master(err.replica_uuid,
+                                                err.master_uuid) then
+                    return nil, err
+                end
             else
                 return nil, err
             end
         end
         lfiber.yield()
-    until lfiber.time() > tend
+    until fiber_clock() > tend
     if err then
         return nil, err
     else
-        local _, boxerror = pcall(box.error, box.error.TIMEOUT)
-        return nil, lerror.box(boxerror)
+        return nil, lerror.timeout()
     end
 end
 
@@ -672,6 +756,177 @@ local function router_call(router, bucket_id, opts, ...)
     end
     return router_call_impl(router, bucket_id, mode, prefer_replica, balance,
                             ...)
+end
+
+local router_map_callrw
+
+if util.version_is_at_least(1, 10, 0) then
+--
+-- Consistent Map-Reduce. The given function is called on all masters in the
+-- cluster with a guarantee that in case of success it was executed with all
+-- buckets being accessible for reads and writes.
+--
+-- Consistency in scope of map-reduce means all the data was accessible, and
+-- didn't move during map requests execution. To preserve the consistency there
+-- is a third stage - Ref. So the algorithm is actually Ref-Map-Reduce.
+--
+-- Refs are broadcast before Map stage to pin the buckets to their storages, and
+-- ensure they won't move until maps are done.
+--
+-- Map requests are broadcast in case all refs are done successfully. They
+-- execute the user function + delete the refs to enable rebalancing again.
+--
+-- On the storages there are additional means to ensure map-reduces don't block
+-- rebalancing forever and vice versa.
+--
+-- The function is not as slow as it may seem - it uses netbox's feature
+-- is_async to send refs and maps in parallel. So cost of the function is about
+-- 2 network exchanges to the most far storage in terms of time.
+--
+-- @param router Router instance to use.
+-- @param func Name of the function to call.
+-- @param args Function arguments passed in netbox style (as an array).
+-- @param opts Can only contain 'timeout' as a number of seconds. Note that the
+--     refs may end up being kept on the storages during this entire timeout if
+--     something goes wrong. For instance, network issues appear. This means
+--     better not use a value bigger than necessary. A stuck infinite ref can
+--     only be dropped by this router restart/reconnect or the storage restart.
+--
+-- @return In case of success - a map with replicaset UUID keys and values being
+--     what the function returned from the replicaset.
+--
+-- @return In case of an error - nil, error object, optional UUID of the
+--     replicaset where the error happened. UUID may be not present if it wasn't
+--     about concrete replicaset. For example, not all buckets were found even
+--     though all replicasets were scanned.
+--
+router_map_callrw = function(router, func, args, opts)
+    local replicasets = router.replicasets
+    local timeout = opts and opts.timeout or consts.CALL_TIMEOUT_MIN
+    local deadline = fiber_clock() + timeout
+    local err, err_uuid, res, ok, map
+    local futures = {}
+    local bucket_count = 0
+    local opts_async = {is_async = true}
+    local rs_count = 0
+    local rid = M.ref_id
+    M.ref_id = rid + 1
+    -- Nil checks are done explicitly here (== nil instead of 'not'), because
+    -- netbox requests return box.NULL instead of nils.
+
+    --
+    -- Ref stage: send.
+    --
+    for uuid, rs in pairs(replicasets) do
+        -- Netbox async requests work only with active connections. Need to wait
+        -- for the connection explicitly.
+        timeout, err = rs:wait_connected(timeout)
+        if timeout == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        res, err = rs:callrw('vshard.storage._call',
+                              {'storage_ref', rid, timeout}, opts_async)
+        if res == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        futures[uuid] = res
+        rs_count = rs_count + 1
+    end
+    map = table_new(0, rs_count)
+    --
+    -- Ref stage: collect.
+    --
+    for uuid, future in pairs(futures) do
+        res, err = future:wait_result(timeout)
+        -- Handle netbox error first.
+        if res == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        -- Ref returns nil,err or bucket count.
+        res, err = res[1], res[2]
+        if res == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        bucket_count = bucket_count + res
+        timeout = deadline - fiber_clock()
+    end
+    -- All refs are done but not all buckets are covered. This is odd and can
+    -- mean many things. The most possible ones: 1) outdated configuration on
+    -- the router and it does not see another replicaset with more buckets,
+    -- 2) some buckets are simply lost or duplicated - could happen as a bug, or
+    -- if the user does a maintenance of some kind by creating/deleting buckets.
+    -- In both cases can't guarantee all the data would be covered by Map calls.
+    if bucket_count ~= router.total_bucket_count then
+        err = lerror.vshard(lerror.code.UNKNOWN_BUCKETS,
+                            router.total_bucket_count - bucket_count)
+        goto fail
+    end
+    --
+    -- Map stage: send.
+    --
+    args = {'storage_map', rid, func, args}
+    for uuid, rs in pairs(replicasets) do
+        res, err = rs:callrw('vshard.storage._call', args, opts_async)
+        if res == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        futures[uuid] = res
+    end
+    --
+    -- Ref stage: collect.
+    --
+    for uuid, f in pairs(futures) do
+        res, err = f:wait_result(timeout)
+        if res == nil then
+            err_uuid = uuid
+            goto fail
+        end
+        -- Map returns true,res or nil,err.
+        ok, res = res[1], res[2]
+        if ok == nil then
+            err = res
+            err_uuid = uuid
+            goto fail
+        end
+        if res ~= nil then
+            -- Store as a table so in future it could be extended for
+            -- multireturn.
+            map[uuid] = {res}
+        end
+        timeout = deadline - fiber_clock()
+    end
+    do return map end
+
+::fail::
+    for uuid, f in pairs(futures) do
+        f:discard()
+        -- Best effort to remove the created refs before exiting. Can help if
+        -- the timeout was big and the error happened early.
+        f = replicasets[uuid]:callrw('vshard.storage._call',
+                                     {'storage_unref', rid}, opts_async)
+        if f ~= nil then
+            -- Don't care waiting for a result - no time for this. But it won't
+            -- affect the request sending if the connection is still alive.
+            f:discard()
+        end
+    end
+    err = lerror.make(err)
+    return nil, err, err_uuid
+end
+
+-- Version >= 1.10.
+else
+-- Version < 1.10.
+
+router_map_callrw = function()
+    error('Supported for Tarantool >= 1.10')
+end
+
 end
 
 --
@@ -749,7 +1004,7 @@ end
 -- connections must be updated.
 --
 local function failover_collect_to_update(router)
-    local ts = lfiber.time()
+    local ts = fiber_clock()
     local uuid_to_update = {}
     for uuid, rs in pairs(router.replicasets) do
         if failover_need_down_priority(rs, ts) or
@@ -772,7 +1027,7 @@ local function failover_step(router)
     if #uuid_to_update == 0 then
         return false
     end
-    local curr_ts = lfiber.time()
+    local curr_ts = fiber_clock()
     local replica_is_changed = false
     for _, uuid in pairs(uuid_to_update) do
         local rs = router.replicasets[uuid]
@@ -855,6 +1110,107 @@ local function failover_f(router)
 end
 
 --------------------------------------------------------------------------------
+-- Master search
+--------------------------------------------------------------------------------
+
+local function master_search_step(router)
+    local ok, is_done, is_nop, err = pcall(lreplicaset.locate_masters,
+                                           router.replicasets)
+    if not ok then
+        err = is_done
+        is_done = false
+        is_nop = false
+    end
+    return is_done, is_nop, err
+end
+
+--
+-- Master discovery background function. It is supposed to notice master changes
+-- and find new masters in the replicasets, which are configured for that.
+--
+-- XXX: due to polling the search might notice master change not right when it
+-- happens. In future it makes sense to rewrite master search using
+-- subscriptions. The problem is that at the moment of writing the subscriptions
+-- are not working well in all Tarantool versions.
+--
+local function master_search_f(router)
+    local module_version = M.module_version
+    local is_in_progress = false
+    local errinj = M.errinj
+    while module_version == M.module_version do
+        if errinj.ERRINJ_MASTER_SEARCH_DELAY then
+            errinj.ERRINJ_MASTER_SEARCH_DELAY = 'in'
+            repeat
+                lfiber.sleep(0.001)
+            until not errinj.ERRINJ_MASTER_SEARCH_DELAY
+        end
+        local timeout
+        local start_time = fiber_clock()
+        local is_done, is_nop, err = master_search_step(router)
+        if err then
+            log.error('Error during master search: %s', lerror.make(err))
+        end
+        if is_done then
+            timeout = consts.MASTER_SEARCH_IDLE_INTERVAL
+        elseif err then
+            timeout = consts.MASTER_SEARCH_BACKOFF_INTERVAL
+        else
+            timeout = consts.MASTER_SEARCH_WORK_INTERVAL
+        end
+        if not is_in_progress then
+            if not is_nop and is_done then
+                log.info('Master search happened')
+            elseif not is_done then
+                log.info('Master search is started')
+                is_in_progress = true
+            end
+        elseif is_done then
+            log.info('Master search is finished')
+            is_in_progress = false
+        end
+        local end_time = fiber_clock()
+        local duration = end_time - start_time
+        if not is_nop then
+            log.verbose('Master search step took %s seconds. Next in %s '..
+                        'seconds', duration, timeout)
+        end
+        lfiber.sleep(timeout)
+    end
+end
+
+local function master_search_set(router)
+    local enable = false
+    for _, rs in pairs(router.replicasets) do
+        if rs.is_auto_master then
+            enable = true
+            break
+        end
+    end
+    local search_fiber = router.master_search_fiber
+    if enable and search_fiber == nil then
+        log.info('Master auto search is enabled')
+        router.master_search_fiber = util.reloadable_fiber_create(
+            'vshard.master_search.' .. router.name, M, 'master_search_f',
+            router)
+    elseif not enable and search_fiber ~= nil then
+        -- Do not make users pay for what they do not use - when the search is
+        -- disabled for all replicasets, there should not be any fiber.
+        log.info('Master auto search is disabled')
+        if search_fiber:status() ~= 'dead' then
+            search_fiber:cancel()
+        end
+        router.master_search_fiber = nil
+    end
+end
+
+local function master_search_wakeup(router)
+    local f = router.master_search_fiber
+    if f then
+        f:wakeup()
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Configuration
 --------------------------------------------------------------------------------
 
@@ -924,6 +1280,7 @@ local function router_cfg(router, cfg, is_reload)
             'vshard.failover.' .. router.name, M, 'failover_f', router)
     end
     discovery_set(router, vshard_cfg.discovery_mode)
+    master_search_set(router)
 end
 
 --------------------------------------------------------------------------------
@@ -1124,7 +1481,7 @@ local function router_info(router)
             bucket_info.available_rw = bucket_info.available_rw +
                                        replicaset.bucket_count
         end
-        -- No necessarity to update color - it is done above
+        -- Not necessary to update the color - it is done above
         -- during replicaset master and replica checking.
         -- If a bucket is unreachable, then replicaset is
         -- unreachable too and color already is red.
@@ -1230,13 +1587,11 @@ local function router_sync(router, timeout)
         timeout = router.sync_timeout
     end
     local arg = {timeout}
-    local clock = lfiber.clock
-    local deadline = timeout and (clock() + timeout)
+    local deadline = timeout and (fiber_clock() + timeout)
     local opts = {timeout = timeout}
     for rs_uuid, replicaset in pairs(router.replicasets) do
         if timeout < 0 then
-            local ok, err = pcall(box.error, box.error.TIMEOUT)
-            return nil, err
+            return nil, lerror.timeout()
         end
         local status, err = replicaset:callrw('vshard.storage.sync', arg, opts)
         if not status then
@@ -1244,7 +1599,7 @@ local function router_sync(router, timeout)
             err.replicaset = rs_uuid
             return nil, err
         end
-        timeout = deadline - clock()
+        timeout = deadline - fiber_clock()
         arg[1] = timeout
         opts.timeout = timeout
     end
@@ -1270,6 +1625,7 @@ local router_mt = {
         callrw = router_callrw;
         callre = router_callre;
         callbre = router_callbre;
+        map_callrw = router_map_callrw,
         route = router_route;
         routeall = router_routeall;
         bucket_id = router_bucket_id,
@@ -1280,6 +1636,7 @@ local router_mt = {
         bootstrap = cluster_bootstrap;
         bucket_discovery = bucket_discovery;
         discovery_wakeup = discovery_wakeup;
+        master_search_wakeup = master_search_wakeup,
         discovery_set = discovery_set,
         _route_map_clear = route_map_clear,
         _bucket_reset = bucket_reset,
@@ -1360,6 +1717,10 @@ end
 --------------------------------------------------------------------------------
 -- Module definition
 --------------------------------------------------------------------------------
+M.discovery_f = discovery_f
+M.failover_f = failover_f
+M.master_search_f = master_search_f
+M.router_mt = router_mt
 --
 -- About functions, saved in M, and reloading see comment in
 -- storage/init.lua.
@@ -1367,6 +1728,9 @@ end
 if not rawget(_G, MODULE_INTERNALS) then
     rawset(_G, MODULE_INTERNALS, M)
 else
+    if not M.ref_id then
+        M.ref_id = 0
+    end
     for _, router in pairs(M.routers) do
         router_cfg(router, router.current_cfg, true)
         setmetatable(router, router_mt)
@@ -1377,10 +1741,6 @@ else
     end
     M.module_version = M.module_version + 1
 end
-
-M.discovery_f = discovery_f
-M.failover_f = failover_f
-M.router_mt = router_mt
 
 module.cfg = legacy_cfg
 module.new = router_new
