@@ -64,40 +64,45 @@ local comparatorSelector = function(name, field)
     end
 end
 
-local stream = {
-    limit = function(generator, parameter, state, count)
-        return functional.take_n(count, generator, parameter, state)
+local streams = {}
+streams["limit"] = function(generator, parameter, state, count)
+    return functional.take_n(count, generator, parameter, state)
+end
+
+streams["offset"] = function(generator, parameter, state, count)
+    return functional.drop_n(count, generator, parameter, state)
+end
+
+streams["filter"] = function(generator, parameter, state, request)
+    return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
+end
+
+streams["sort"] = function(generator, parameter, state, request)
+    local values = art.core.stream.collect(generator, parameter, state)
+    table.sort(values, comparatorSelector(unpack(request)))
+    return functional.iter(values)
+end
+
+streams["distinct"] = function(generator, parameter, state, field)
+    local result = {}
+    for _, item in functional.iter(generator, parameter, state) do
+        result[item[field]] = item
+    end
+    return pairs(result)
+end
+
+streams["collect"] = function(generator, parameter, state)
+    local results = {}
+    for _, item in functional.iter(generator, parameter, state) do
+        table.insert(results, item)
+    end
+    return results
+end
+
+return {
+    select = function(stream)
+        return streams[stream]
     end,
 
-    offset = function(generator, parameter, state, count)
-        return functional.drop_n(count, generator, parameter, state)
-    end,
-
-    filter = function(generator, parameter, state, request)
-        return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
-    end,
-
-    sort = function(generator, parameter, state, request)
-        local values = art.core.stream.collect(generator, parameter, state)
-        table.sort(values, comparatorSelector(unpack(request)))
-        return functional.iter(values)
-    end,
-
-    distinct = function(generator, parameter, state, field)
-        local result = {}
-        for _, item in functional.iter(generator, parameter, state) do
-            result[item[field]] = item
-        end
-        return pairs(result)
-    end,
-
-    collect = function(generator, parameter, state)
-        local results = {}
-        for _, item in functional.iter(generator, parameter, state) do
-            table.insert(results, item)
-        end
-        return results
-    end,
+    collect = streams["collect"]
 }
-
-return stream

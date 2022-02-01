@@ -20,8 +20,22 @@ local box = {
         return result
     end,
 
-    find = function(space, filter)
-        return {}
+    find = function(request)
+        local space = request[1]
+        local index = request[2]
+        local key = request[3]
+        local iterator = request[4]
+        local operations = request[5]
+
+        local generator, param, state = box.space[space].index[index]:pairs(key, { iterator = iterator })
+
+        for _, operation in pairs(operations) do
+            local operationName = operation[1]
+            local operationParameters = operation[2]
+            generator, param, state = art.storage.stream.select(operationName)(generator, param, state, operationParameters)
+        end
+
+        local response = art.core.stream.collect(generator, param, state)
     end,
 
     delete = function(space, key)
