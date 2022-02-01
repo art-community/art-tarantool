@@ -1,17 +1,24 @@
 local box = {
-    findFirst = function(space, key, index)
+    findFirst = function(request)
+        local space = request[1]
+        local key = request[2]
+        local index = request[3]
+
         if not (index) then
             return box.space[space]:get(key)
         end
         return box.space[space].index[index]:get(key)
     end,
 
-    findAll = function(space, keys)
+    findAll = function(request)
+        local space = request[1]
+        local keys = request[2]
         local result = {}
         for _, key in pairs(keys) do
             table.insert(result, art.box.findFirst(space, key))
         end
-        return result end,
+        return result
+    end,
 
     find = function(space, filter)
         return {}
@@ -92,7 +99,7 @@ local box = {
         return result
     end,
 
-    indexes = function(space)
+    indicies = function(space)
         local result = {}
         for _, value in pairs(box.space[space].index) do
             table.insert(result, value.name)

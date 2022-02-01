@@ -1,103 +1,103 @@
+local functional = require('fun')
+
+local filters = {}
+
+filters["equals"] = function(filtering, field, value)
+    return filtering[field] == value
+end
+
+filters["notEquals"] = function(filtering, field, value)
+    return not (filtering[field] == value)
+end
+
+filters["more"] = function(filtering, field, value)
+    return filtering[field] > value
+end
+
+filters["less"] = function(filtering, field, value)
+    return filtering[field] < value
+end
+
+filters["in"] = function(filtering, field, startValue, endValue)
+    return (filtering[field] >= startValue) and (filtering[field] <= endValue)
+end
+
+filters["notIn"] = function(filtering, field, startValue, endValue)
+    return not ((filtering[field] >= startValue) and (filtering[field] <= endValue))
+end
+
+filters["like"] = function(filtering, field, pattern)
+    return string.find(filtering[field], pattern) ~= nil
+end
+
+filters["startsWith"] = function(filtering, field, pattern)
+    return string.startswith(filtering[field], pattern)
+end
+
+filters["endsWith"] = function(filtering, field, pattern)
+    return string.endswith(filtering[field], pattern)
+end
+
+filters["contains"] = function(filtering, field, pattern)
+    return string.find(filtering[field], pattern)
+end
+
+local filterSelector = function(name, field, firstParameter, secondParameter)
+    return function(filtering)
+        return filters[name](filtering, field, firstParameter, secondParameter)
+    end
+end
+
+local comparators = {}
+
+comparators["greater"] = function(first, second, field)
+    return first[field] > second[field]
+end
+
+comparators["less"] = function(first, second, field)
+    return first[field] < second[field]
+end
+
+local comparatorSelector = function(name, field)
+    return function(first, second)
+        return comparators[name](first, second, field)
+    end
+end
+
 local stream = {
-    limit = function(gen, param, state, count)
-        return art.core.functional.take_n(count, gen, param, state)
+    limit = function(generator, parameter, state, count)
+        return functional.take_n(count, generator, parameter, state)
     end,
 
-    offset = function(gen, param, state, count)
-        return art.core.functional.drop_n(count, gen, param, state)
+    offset = function(generator, parameter, state, count)
+        return functional.drop_n(count, generator, parameter, state)
     end,
 
-    filter = function(gen, param, state, args)
-        return art.core.functional.filter(art.core.stream.filters.compile(unpack(args)), gen, param, state)
+    filter = function(generator, parameter, state, request)
+        return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
     end,
 
-    sort = function(gen, param, state, args)
-        local values = art.core.stream.collect(gen, param, state)
-        table.sort(values, art.core.stream.comparators.compile(unpack(args)))
-        return art.core.functional.iter(values)
+    sort = function(generator, parameter, state, request)
+        local values = art.core.stream.collect(generator, parameter, state)
+        table.sort(values, comparatorSelector(unpack(request)))
+        return functional.iter(values)
     end,
 
-    distinct = function(gen, param, state, fieldno)
+    distinct = function(generator, parameter, state, field)
         local result = {}
-        for _, item in art.core.functional.iter(gen, param, state) do
-            result[item[fieldno]] = item
+        for _, item in functional.iter(generator, parameter, state) do
+            result[item[field]] = item
         end
         return pairs(result)
     end,
 
-    collect = function(gen, param, state)
+    collect = function(generator, parameter, state)
         local results = {}
-        for _, v in art.core.functional.iter(gen, param, state) do
-            table.insert(results, v)
+        for _, item in functional.iter(generator, parameter, state) do
+            table.insert(results, item)
         end
         return results
     end,
-
-    filters = {
-        compile = function(filter, fieldno, arg1, arg2)
-            return function(object)
-                return art.core.functionFromString(filter)(object, fieldno, arg1, arg2)
-            end
-        end,
-
-        equals = function(object, fieldno, value)
-            return object[fieldno] == value
-        end,
-
-        notEquals = function(object, fieldno, value)
-            return not (object[fieldno] == value)
-        end,
-
-        more = function(object, fieldno, value)
-            return object[fieldno] > value
-        end,
-
-        less = function(object, fieldno, value)
-            return object[fieldno] < value
-        end,
-
-        inRange = function(object, fieldno, startValue, endValue)
-            return (object[fieldno] >= startValue) and (object[fieldno] <= endValue)
-        end,
-
-        notInRange = function(object, fieldno, startValue, endValue)
-            return not ((object[fieldno] >= startValue) and (object[fieldno] <= endValue))
-        end,
-
-        like = function(object, fieldno, pattern)
-            return string.find(object[fieldno], pattern) ~= nil
-        end,
-
-        startsWith = function(object, fieldno, pattern)
-            return string.startswith(object[fieldno], pattern)
-        end,
-
-        endsWith = function(object, fieldno, pattern)
-            return string.endswith(object[fieldno], pattern)
-        end,
-
-        contains = function(object, fieldno, pattern)
-            return string.find(object[fieldno], pattern)
-        end,
-
-    },
-
-    comparators = {
-        compile = function(comparator, fieldno)
-            return function(left, right)
-                return art.core.functionFromString(comparator)(left, right, fieldno)
-            end
-        end,
-
-        greater = function(first, second, fieldno)
-            return first[fieldno] > second[fieldno]
-        end,
-
-        less = function(first, second, fieldno)
-            return first[fieldno] < second[fieldno]
-        end
-
-    }
 }
 
 return stream
