@@ -1,7 +1,6 @@
 local functional = require('fun')
 
 local filters = {}
-
 filters["equals"] = function(filtering, field, value)
     return filtering[field] == value
 end
@@ -49,7 +48,6 @@ local filterSelector = function(name, field, firstParameter, secondParameter)
 end
 
 local comparators = {}
-
 comparators["greater"] = function(first, second, field)
     return first[field] > second[field]
 end
