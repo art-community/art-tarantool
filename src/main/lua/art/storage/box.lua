@@ -30,9 +30,10 @@ local box = {
         local generator, param, state = box.space[space].index[index]:pairs(key, { iterator = iterator })
 
         for _, operation in pairs(operations) do
-            local operationName = operation[1]
-            local operationParameters = operation[2]
-            generator, param, state = art.storage.stream.select(operationName)(generator, param, state, operationParameters)
+            local name = operation[1]
+            local parameters = operation[2]
+            local operator = art.storage.stream.select(name)
+            generator, param, state = operator(generator, param, state, parameters)
         end
 
         local response = art.core.stream.collect(generator, param, state)
