@@ -76,7 +76,7 @@ streams["filter"] = function(generator, parameter, state, request)
 end
 
 streams["sort"] = function(generator, parameter, state, request)
-    local values = art.core.stream.collect(generator, parameter, state)
+    local values = streams["collect"](generator, parameter, state)
     table.sort(values, comparatorSelector(unpack(request)))
     return functional.iter(values)
 end
