@@ -63,6 +63,15 @@ local comparatorSelector = function(name, field)
 end
 
 local streams = {}
+streams["collect"] = function(generator, parameter, state)
+    local results = {}
+    for _, item in functional.iter(generator, parameter, state) do
+        table.insert(results, item)
+    end
+    return results
+end
+local collect = streams["collect"]
+
 streams["limit"] = function(generator, parameter, state, count)
     return functional.take_n(count, generator, parameter, state)
 end
@@ -76,7 +85,7 @@ streams["filter"] = function(generator, parameter, state, request)
 end
 
 streams["sort"] = function(generator, parameter, state, request)
-    local values = streams["collect"](generator, parameter, state)
+    local values = collect(generator, parameter, state)
     table.sort(values, comparatorSelector(unpack(request)))
     return functional.iter(values)
 end
@@ -89,18 +98,10 @@ streams["distinct"] = function(generator, parameter, state, field)
     return pairs(result)
 end
 
-streams["collect"] = function(generator, parameter, state)
-    local results = {}
-    for _, item in functional.iter(generator, parameter, state) do
-        table.insert(results, item)
-    end
-    return results
-end
-
 return {
     select = function(stream)
         return streams[stream]
     end,
 
-    collect = streams["collect"]
+    collect = collect
 }
