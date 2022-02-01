@@ -37,6 +37,17 @@ local box = {
         end
 
         local response = art.core.stream.collect(generator, param, state)
+
+        if response[1] == nil then
+            return {}
+        end
+
+        local result = {}
+        for _, entry in pairs(response) do
+            table.insert(result, entry)
+        end
+
+        return result
     end,
 
     delete = function(space, key)
