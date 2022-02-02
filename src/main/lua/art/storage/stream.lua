@@ -41,9 +41,9 @@ filters["contains"] = function(filtering, field, pattern)
     return string.find(filtering[field], pattern)
 end
 
-local filterSelector = function(name, field, firstParameter, secondParameter)
+local filterSelector = function(name, field, request)
     return function(filtering)
-        return filters[name](filtering, field, firstParameter, secondParameter)
+        return filters[name](filtering, field, unpack(request))
     end
 end
 
@@ -81,12 +81,12 @@ streams["offset"] = function(generator, parameter, state, count)
 end
 
 streams["filter"] = function(generator, parameter, state, request)
-    return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
+    return functional.filter(filterSelector(request), generator, parameter, state)
 end
 
-streams["sort"] = function(generator, parameter, state, request)
+streams["sort"] = function(generator, parameter, state, field)
     local values = collect(generator, parameter, state)
-    table.sort(values, comparatorSelector(unpack(request)))
+    table.sort(values, comparatorSelector(field))
     return functional.iter(values)
 end
 
