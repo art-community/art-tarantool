@@ -6,10 +6,10 @@ local function initialize()
             end
         end
         for name in pairs(art.space.single) do
-            box.schema.func("art.space.single" .. name, { if_not_exists = true })
+            box.schema.func("art.space.single." .. name, { if_not_exists = true })
         end
         for name in pairs(art.space.multiple) do
-            box.schema.func("art.space.multiple" .. name, { if_not_exists = true })
+            box.schema.func("art.space.multiple." .. name, { if_not_exists = true })
         end
 
         for name in pairs(art.index) do
@@ -18,10 +18,10 @@ local function initialize()
             end
         end
         for name in pairs(art.index.single) do
-            box.schema.func("art.index.single" .. name, { if_not_exists = true })
+            box.schema.func("art.index.single." .. name, { if_not_exists = true })
         end
         for name in pairs(art.index.multiple) do
-            box.schema.func("art.index.multiple" .. name, { if_not_exists = true })
+            box.schema.func("art.index.multiple." .. name, { if_not_exists = true })
         end
 
         for name in pairs(art.schema) do
