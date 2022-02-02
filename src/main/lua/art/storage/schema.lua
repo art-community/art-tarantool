@@ -1,5 +1,8 @@
 local schema = {
     createIndex = function(space, name, configuration)
+        if not configuration then
+            configuration = {}
+        end
         return box.space[space]:create_index(name, configuration)
     end,
 
@@ -21,7 +24,7 @@ local schema = {
     end,
 
     createSpace = function(name, configuration)
-        if not (configuration) then
+        if not configuration then
             configuration = {}
         end
         box.schema.space.create(name, configuration)
