@@ -30,7 +30,7 @@ local function initialize()
     end)
 end
 
-return {
+art = {
     space = require("art.storage.space"),
 
     index = require("art.storage.index"),
@@ -41,3 +41,5 @@ return {
 
     initialize = initialize
 }
+
+return art
