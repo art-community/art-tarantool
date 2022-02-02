@@ -8,10 +8,13 @@ local transformer = {
     end,
 
     put = function(space, data)
+        local log = require('log')
+        log.info(space)
+        log.info(data)
         return box.space[space]:put(data)
     end,
 
-    replace = art.storage.space.single.put,
+    replace = put,
 
     update = function(space, key, commands)
         return box.space[space].update(space, key, commands)

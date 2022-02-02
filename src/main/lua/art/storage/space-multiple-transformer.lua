@@ -23,7 +23,7 @@ local transformer = {
         return results
     end,
 
-    replace = art.storage.space.multiple.put
+    replace = put
 }
 
 return transformer
