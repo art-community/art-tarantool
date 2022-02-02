@@ -32,6 +32,10 @@ local space = {
         box.space[space]:truncate()
         return {}
     end,
+
+    multiple = require("art.storage.space-multiple-transformer"),
+
+    single = require("art.storage.space-single-transformer"),
 }
 
 return space
