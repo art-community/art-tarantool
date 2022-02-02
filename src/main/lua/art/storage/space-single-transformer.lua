@@ -8,9 +8,6 @@ local transformer = {
     end,
 
     put = function(space, data)
-        local log = require('log')
-        log.info(space)
-        log.info(data)
         return box.space[space]:put(data)
     end,
 
