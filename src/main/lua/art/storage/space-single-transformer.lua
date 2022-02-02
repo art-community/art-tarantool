@@ -11,7 +11,7 @@ local transformer = {
         return box.space[space]:put(data)
     end,
 
-    replace = art.box.put,
+    replace = art.storage.space.single.put,
 
     update = function(space, key, commands)
         return box.space[space].update(space, key, commands)
