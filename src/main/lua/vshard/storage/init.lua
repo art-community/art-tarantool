@@ -524,7 +524,7 @@ local function schema_init_0_1_15_0(username, password)
     }
 
     for _, name in ipairs(storage_api) do
-        box.schema.func.create(name, {setuid = true})
+        box.schema.func.create.create(name, {setuid = true})
         box.schema.user.grant(username, 'execute', 'function', name)
     end
 
@@ -545,7 +545,7 @@ local function schema_upgrade_to_0_1_16_0(username)
     -- functions without touching the schema.
     local func = 'vshard.storage._call'
     log.info('Create function %s()', func)
-    box.schema.func.create(func, {setuid = true})
+    box.schema.func.create.create(func, {setuid = true})
     box.schema.user.grant(username, 'execute', 'function', func)
     -- Don't drop old functions in the same version. Removal can
     -- happen only after 0.1.16. Or there should appear support of
@@ -561,7 +561,7 @@ local function schema_downgrade_from_0_1_16_0()
 
     local func = 'vshard.storage._call'
     log.info('Remove function %s()', func)
-    box.schema.func.drop(func, {if_exists = true})
+    box.schema.func.create.drop(func, {if_exists = true})
 end
 
 local function schema_current_version()
