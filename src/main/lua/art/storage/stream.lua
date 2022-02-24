@@ -48,7 +48,7 @@ local filterSelector = function(name, field, request)
 end
 
 local comparators = {}
-comparators["greater"] = function(first, second, field)
+comparators["more"] = function(first, second, field)
     return first[field] > second[field]
 end
 
