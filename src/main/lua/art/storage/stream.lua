@@ -81,12 +81,12 @@ streams["offset"] = function(generator, parameter, state, count)
 end
 
 streams["filter"] = function(generator, parameter, state, request)
-    return functional.filter(filterSelector(request), generator, parameter, state)
+    return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
 end
 
-streams["sort"] = function(generator, parameter, state, field)
+streams["sort"] = function(generator, parameter, state, request)
     local values = collect(generator, parameter, state)
-    table.sort(values, comparatorSelector(field))
+    table.sort(values, comparatorSelector(unpack(request)))
     return functional.iter(values)
 end
 
