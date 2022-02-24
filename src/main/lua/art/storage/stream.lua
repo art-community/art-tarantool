@@ -1,6 +1,7 @@
 local functional = require('fun')
 
 local filters = {}
+
 filters["equals"] = function(filtering, field, value)
     return filtering[field] == value
 end
@@ -48,6 +49,7 @@ local filterSelector = function(name, field, request)
 end
 
 local comparators = {}
+
 comparators["more"] = function(first, second, field)
     return first[field] > second[field]
 end
@@ -63,14 +65,14 @@ local comparatorSelector = function(name, field)
 end
 
 local streams = {}
-streams["collect"] = function(generator, parameter, state)
+
+local collect = function(generator, parameter, state)
     local results = {}
     for _, item in functional.iter(generator, parameter, state) do
         table.insert(results, item)
     end
     return results
 end
-local collect = streams["collect"]
 
 streams["limit"] = function(generator, parameter, state, count)
     return functional.take_n(count, generator, parameter, state)
