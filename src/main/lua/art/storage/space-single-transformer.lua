@@ -15,11 +15,7 @@ local transformer = {
 
     update = function(space, key, commands)
         return box.space[space].update(space, key, commands)
-    end,
-
-    upsert = function(space, data, commands)
-        return box.space[space].upsert(data, commands)
-    end,
+    end
 }
 
 return transformer
