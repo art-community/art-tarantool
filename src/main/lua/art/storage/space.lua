@@ -2,7 +2,6 @@ stream = require("art.storage.stream")
 
 local space = {
     findFirst = function(space, key)
-        box.session.push("test")
         return box.space[space]:get(key)
     end,
 
