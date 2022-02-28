@@ -1,13 +1,49 @@
 local functional = require('fun')
 
+local function deepEqual(first, second)
+    if first == second then
+        return true
+    end
+
+    if type(first) == "table" and type(second) == "table" then
+        for key1, value1 in pairs(first) do
+            local value2 = second[key1]
+
+            if value2 == nil then
+                return false
+            end
+
+            if value1 ~= value2 then
+                if type(value1) == "table" and type(value2) == "table" then
+                    if not deepEqual(value1, value2) then
+                        return false
+                    end
+                end
+
+                return false
+            end
+        end
+
+        for key2, _ in pairs(second) do
+            if first[key2] == nil then
+                return false
+            end
+        end
+
+        return true
+    end
+
+    return false
+end
+
 local filters = {}
 
 filters["equals"] = function(filtering, field, value)
-    return filtering[field] == value
+    return deepEqual(filtering[field], value)
 end
 
 filters["notEquals"] = function(filtering, field, value)
-    return not (filtering[field] == value)
+    return not deepEqual(filtering[field], value)
 end
 
 filters["more"] = function(filtering, field, value)
@@ -18,16 +54,32 @@ filters["less"] = function(filtering, field, value)
     return filtering[field] < value
 end
 
-filters["in"] = function(filtering, field, startValue, endValue)
+filters["between"] = function(filtering, field, startValue, endValue)
     return (filtering[field] >= startValue) and (filtering[field] <= endValue)
 end
 
-filters["notIn"] = function(filtering, field, startValue, endValue)
+filters["notBetween"] = function(filtering, field, startValue, endValue)
     return not ((filtering[field] >= startValue) and (filtering[field] <= endValue))
 end
 
-filters["like"] = function(filtering, field, pattern)
-    return string.find(filtering[field], pattern) ~= nil
+filters["in"] = function(filtering, field, values)
+    for _, value in pairs(values) do
+        if deepEqual(filtering[field], value) then
+            return true
+        end
+    end
+
+    return false
+end
+
+filters["notIn"] = function(filtering, field, values)
+    for _, value in pairs(values) do
+        if not deepEqual(filtering[field], value) then
+            return false
+        end
+    end
+
+    return true
 end
 
 filters["startsWith"] = function(filtering, field, pattern)
@@ -64,9 +116,9 @@ local comparatorSelector = function(name, field)
     end
 end
 
-local streams = {}
+local terminalFunctors = {}
 
-local collect = function(generator, parameter, state)
+terminalFunctors["collect"] = function(generator, parameter, state)
     local results = {}
     for _, item in functional.iter(generator, parameter, state) do
         table.insert(results, item)
@@ -74,25 +126,39 @@ local collect = function(generator, parameter, state)
     return results
 end
 
-streams["limit"] = function(generator, parameter, state, count)
+terminalFunctors["count"] = function(generator, parameter, state)
+    return functional.length(generator, parameter, state)
+end
+
+terminalFunctors["all"] = function(generator, parameter, state, request)
+    return functional.all(filterSelector(unpack(request)), generator, parameter, state)
+end
+
+terminalFunctors["any"] = function(generator, parameter, state, request)
+    return functional.any(filterSelector(unpack(request)), generator, parameter, state)
+end
+
+local processingFunctors = {}
+
+processingFunctors["limit"] = function(generator, parameter, state, count)
     return functional.take_n(count, generator, parameter, state)
 end
 
-streams["offset"] = function(generator, parameter, state, count)
+processingFunctors["offset"] = function(generator, parameter, state, count)
     return functional.drop_n(count, generator, parameter, state)
 end
 
-streams["filter"] = function(generator, parameter, state, request)
+processingFunctors["filter"] = function(generator, parameter, state, request)
     return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
 end
 
-streams["sort"] = function(generator, parameter, state, request)
+processingFunctors["sort"] = function(generator, parameter, state, request)
     local values = collect(generator, parameter, state)
     table.sort(values, comparatorSelector(unpack(request)))
     return functional.iter(values)
 end
 
-streams["distinct"] = function(generator, parameter, state, field)
+processingFunctors["distinct"] = function(generator, parameter, state, field)
     local result = {}
     for _, item in functional.iter(generator, parameter, state) do
         result[item[field]] = item
@@ -101,9 +167,10 @@ streams["distinct"] = function(generator, parameter, state, field)
 end
 
 return {
-    select = function(stream)
-        return streams[stream]
+    processingFunctor = function(stream)
+        return processingFunctors[stream]
     end,
-
-    collect = collect
+    terminalFunctor = function(stream)
+        return terminalFunctors[stream]
+    end,
 }

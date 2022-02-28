@@ -11,17 +11,16 @@ local index = {
         return result
     end,
 
-    find = function(space, index, key, operators)
-        local generator, parameter, state = box.space[space].index[index]:pairs(key)
+    stream = function(space, index, processingOperators, terminalOperator)
+        local generator, param, state = box.space[space].index[index]:pairs()
 
-        for _, operator in pairs(operators) do
+        for _, operator in pairs(processingOperators) do
             local name = operator[1]
             local parameters = operator[2]
-            local functor = art.storage.stream.select(name)
-            generator, parameter, state = functor(generator, parameter, state, parameters)
+            generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return art.storage.stream.collect(generator, parameter, state)
+        return stream.terminalFunctor(terminalOperator)(generator, param, state)
     end,
 
     count = function(space, index, key)

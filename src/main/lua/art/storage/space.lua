@@ -16,17 +16,16 @@ local space = {
         return result
     end,
 
-    find = function(space, operators)
+    stream = function(space, processingOperators, terminalOperator)
         local generator, param, state = box.space[space]:pairs()
 
-        for _, operator in pairs(operators) do
+        for _, operator in pairs(processingOperators) do
             local name = operator[1]
             local parameters = operator[2]
-            local functor = stream.select(name)
-            generator, param, state = functor(generator, param, state, parameters)
+            generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return stream.collect(generator, param, state)
+        return stream.terminalFunctor(terminalOperator)(generator, param, state)
     end,
 
     count = function(space)
