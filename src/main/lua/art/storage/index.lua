@@ -11,7 +11,7 @@ local index = {
         return result
     end,
 
-    stream = function(space, index, processingOperators, terminalOperator)
+    stream = function(space, index, processingOperators, terminatingOperator)
         local generator, param, state = box.space[space].index[index]:pairs()
 
         for _, operator in pairs(processingOperators) do
@@ -20,7 +20,7 @@ local index = {
             generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return stream.terminalFunctor(terminalOperator)(generator, param, state)
+        return stream.terminatingFunctor(terminatingOperator)(generator, param, state)
     end,
 
     count = function(space, index, key)
