@@ -51,6 +51,8 @@ art = {
 
     stream = require("art.storage.stream"),
 
+    subscription = require("art.storage.subscription"),
+
     initialize = initialize
 }
 
