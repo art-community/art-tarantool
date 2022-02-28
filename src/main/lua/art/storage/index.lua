@@ -20,7 +20,7 @@ local index = {
             generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return stream.terminatingFunctor(terminatingOperator)(generator, param, state)
+        return stream.terminatingFunctor(terminatingOperator[1])(generator, param, state, terminatingOperator[2])
     end,
 
     count = function(space, index, key)
