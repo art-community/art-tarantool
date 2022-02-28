@@ -16,7 +16,7 @@ local space = {
         return result
     end,
 
-    stream = function(space, processingOperators, terminalOperator)
+    stream = function(space, processingOperators, terminatingOperator)
         local generator, param, state = box.space[space]:pairs()
 
         for _, operator in pairs(processingOperators) do
@@ -25,7 +25,7 @@ local space = {
             generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return stream.terminalFunctor(terminalOperator)(generator, param, state)
+        return stream.terminatingFunctor(terminatingOperator[1])(generator, param, state, terminatingOperator[2])
     end,
 
     count = function(space)

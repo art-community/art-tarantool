@@ -116,9 +116,9 @@ local comparatorSelector = function(name, field)
     end
 end
 
-local terminalFunctors = {}
+local terminatingFunctors = {}
 
-terminalFunctors["collect"] = function(generator, parameter, state)
+terminatingFunctors["collect"] = function(generator, parameter, state)
     local results = {}
     for _, item in functional.iter(generator, parameter, state) do
         table.insert(results, item)
@@ -126,15 +126,15 @@ terminalFunctors["collect"] = function(generator, parameter, state)
     return results
 end
 
-terminalFunctors["count"] = function(generator, parameter, state)
+terminatingFunctors["count"] = function(generator, parameter, state)
     return functional.length(generator, parameter, state)
 end
 
-terminalFunctors["all"] = function(generator, parameter, state, request)
+terminatingFunctors["all"] = function(generator, parameter, state, request)
     return functional.all(filterSelector(unpack(request)), generator, parameter, state)
 end
 
-terminalFunctors["any"] = function(generator, parameter, state, request)
+terminatingFunctors["any"] = function(generator, parameter, state, request)
     return functional.any(filterSelector(unpack(request)), generator, parameter, state)
 end
 
@@ -152,7 +152,7 @@ processingFunctors["filter"] = function(generator, parameter, state, request)
     return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
 end
 
-local collect = terminalFunctors["collect"]
+local collect = terminatingFunctors["collect"]
 processingFunctors["sort"] = function(generator, parameter, state, request)
     local values = collect(generator, parameter, state)
     table.sort(values, comparatorSelector(unpack(request)))
@@ -171,7 +171,7 @@ return {
     processingFunctor = function(stream)
         return processingFunctors[stream]
     end,
-    terminalFunctor = function(stream)
-        return terminalFunctors[stream]
+    terminatingFunctor = function(stream)
+        return terminatingFunctors[stream]
     end,
 }
