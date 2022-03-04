@@ -36,6 +36,10 @@ local function deepEqual(first, second)
     return false
 end
 
+local applyFilter = function(filter, generator, parameter, state)
+    return functional.filter(filter, generator, parameter, state)
+end
+
 local filters = {}
 
 filters["equals"] = function(filtering, field, request)
@@ -94,9 +98,13 @@ filters["contains"] = function(filtering, field, request)
     return string.find(filtering[field], request[1])
 end
 
+local selectFilter = function(name, filtering, field, request)
+    return filters[name](filtering, field, request)
+end
+
 local filterSelector = function(name, field, request)
     return function(filtering)
-        return filters[name](filtering, field, request)
+        return selectFilter(name, filtering, field, request)
     end
 end
 
@@ -149,7 +157,55 @@ processingFunctors["offset"] = function(generator, parameter, state, count)
 end
 
 processingFunctors["filter"] = function(generator, parameter, state, request)
-    return functional.filter(filterSelector(unpack(request)), generator, parameter, state)
+    return applyFilter(filterSelector(unpack(request)), generator, parameter, state)
+end
+
+processingFunctors["filterWith"] = function(generator, parameter, state, request)
+    local requestedMappers = request[1]
+    local requestedFilters = request[2]
+
+    local filteringFunction = function(filtering)
+        for index, mapper in pairs(requestedMappers) do
+            local mode = mapper[1]
+
+            if mode == "byKey" then
+                local mappedSpace = mapper[2]
+                local keyField = mapper[3]
+                local mapped = box.space[mappedSpace].get(filtering[keyField])
+                local filter = requestedFilters[index]
+                local filterName = filter[1]
+                local filterCurrentField = filter[2]
+                local filterOtherFields = filter[3]
+                local filterOtherValues = {}
+                for _, otherField in pairs(filterOtherFields) do
+                    table.insert(filterOtherValues, mapped[otherField])
+                end
+                return selectFilter(filterName, filtering, filterCurrentField, { filterCurrentField, filterOtherValues })
+            end
+
+            if mode == "byIndex" then
+                local mappedSpace = mapper[2]
+                local mappedIndex = mapper[3]
+                local keyFields = mapper[4]
+                local indexKeys = {}
+                for _, keyField in pairs(keyFields) do
+                    table.insert(keyFields, filtering[keyField])
+                end
+                local mapped = box.space[mappedSpace]:index(mappedIndex).get(indexKeys)
+                local filter = requestedFilters[index]
+                local filterName = filter[1]
+                local filterCurrentField = filter[2]
+                local filterOtherFields = filter[3]
+                local filterOtherValues = {}
+                for _, otherField in pairs(filterOtherFields) do
+                    table.insert(filterOtherValues, mapped[otherField])
+                end
+                return selectFilter(filterName, filtering, filterCurrentField, { filterCurrentField, filterOtherValues })
+            end
+        end
+    end
+
+    return applyFilter(filteringFunction, generator, parameter, state)
 end
 
 local collect = terminatingFunctors["collect"]
@@ -171,6 +227,7 @@ return {
     processingFunctor = function(stream)
         return processingFunctors[stream]
     end,
+
     terminatingFunctor = function(stream)
         return terminatingFunctors[stream]
     end,
