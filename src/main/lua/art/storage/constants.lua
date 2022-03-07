@@ -25,7 +25,8 @@ local stream = {
     mappingModes = {
         mapBySpace = 1,
         mapByIndex = 2,
-        mapByFunction = 3
+        mapByFunction = 3,
+        mapByField = 4
     },
     comparators = {
         comparatorMore = 1,

@@ -240,6 +240,11 @@ processingFunctors[constants.processingFunctions.map] = function(generator, para
             return box.func[functionName]:call(mapping)
         end
 
+        if mode == constants.mappingModes.mapByField then
+            local field = request[2]
+            return mapping[field]
+        end
+
         if mode == constants.mappingModes.mapBySpace then
             local otherSpace = request[3]
             local currentField = request[4]
