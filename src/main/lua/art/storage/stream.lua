@@ -168,12 +168,12 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
             end
 
             if mode == constants.filterModes.filterBySpace then
-                local mappingParameters = filter[3]
-                local otherSpace = mappingParameters[1]
-                local currentField = mappingParameters[2]
+                local parameters = filter[3]
+                local otherSpace = parameters[1]
+                local currentField = parameters[2]
                 local mapped = box.space[otherSpace]:get(filtering[currentField])
                 if mapped ~= nil then
-                    local expressions = filter[3]
+                    local expressions = filter[4]
                     for _, expression in pairs(expressions) do
                         local expressionCondition = expression[1]
                         local expressionCurrentField = expression[2]
@@ -192,10 +192,10 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
             end
 
             if mode == constants.filterModes.filterByIndex then
-                local mappingParameters = filter[3]
-                local otherSpace = mappingParameters[1]
-                local currentFields = mappingParameters[2]
-                local otherIndex = mappingParameters[3]
+                local parameters = filter[3]
+                local otherSpace = parameters[1]
+                local currentFields = parameters[2]
+                local otherIndex = parameters[3]
                 local indexKeys = {}
                 for _, keyField in pairs(currentFields) do
                     table.insert(indexKeys, filtering[keyField])
@@ -203,7 +203,7 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
                 if next(indexKeys) ~= nil then
                     local mapped = box.space[otherSpace]:index(otherIndex):get(indexKeys)
                     if mapped ~= nil then
-                        local expressions = filter[3]
+                        local expressions = filter[4]
                         for _, expression in pairs(expressions) do
                             local expressionCondition = expression[1]
                             local expressionCurrentField = expression[2]
@@ -224,9 +224,44 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
                 end
             end
         end
+
+        return result
     end
 
     return functional.filter(filteringFunction, generator, parameter, state)
+end
+
+processingFunctors[constants.processingFunctions.map] = function(generator, parameter, state, request)
+    local mappingFunction = function(mapping)
+        local mode = request[1]
+
+        if mode == constants.mappingModes.mapByFunction then
+            local functionName = request[2]
+            return box.func[functionName]:call(mapping)
+        end
+
+        if mode == constants.mappingModes.mapBySpace then
+            local otherSpace = request[3]
+            local currentField = request[4]
+            return box.space[otherSpace]:get(mapping[currentField])
+        end
+
+        if mode == constants.mappingModes.mapByIndex then
+            local otherSpace = request[3]
+            local currentFields = request[4]
+            local otherIndex = request[5]
+            local indexKeys = {}
+            for _, keyField in pairs(currentFields) do
+                table.insert(indexKeys, mapping[keyField])
+            end
+            if next(indexKeys) == nil then
+                return nil
+            end
+            return box.space[otherSpace]:index(otherIndex):get(indexKeys)
+        end
+    end
+
+    return functional.map(mappingFunction, generator, parameter, state)
 end
 
 return {

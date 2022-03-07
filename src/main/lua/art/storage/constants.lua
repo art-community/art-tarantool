@@ -22,6 +22,11 @@ local stream = {
         filterByValue = 3,
         filterByFunction = 4
     },
+    mappingModes = {
+        mapBySpace = 1,
+        mapByIndex = 2,
+        mapByFunction = 3
+    },
     comparators = {
         comparatorMore = 1,
         comparatorLess = 2,
@@ -32,8 +37,7 @@ local stream = {
         filter = 3,
         sort = 4,
         distinct = 5,
-        map = 6,
-        flatMap = 7
+        map = 6
     },
     terminatingFunctions = {
         collect = 1,
