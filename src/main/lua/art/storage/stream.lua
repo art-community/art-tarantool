@@ -154,7 +154,7 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
             local condition = filter[1]
             local mode = filter[2]
 
-            if mode == constants.filterModes.filterByValue then
+            if mode == constants.filterModes.filterByField then
                 local parameters = filter[3]
                 local field = parameters[1]
                 local name = parameters[2]

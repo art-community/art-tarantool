@@ -19,7 +19,7 @@ local stream = {
     filterModes = {
         filterBySpace = 1,
         filterByIndex = 2,
-        filterByValue = 3,
+        filterByField = 3,
         filterByFunction = 4
     },
     mappingModes = {
