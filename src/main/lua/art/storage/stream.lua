@@ -216,7 +216,7 @@ processingFunctors[constants.processingFunctions.filter] = function(generator, p
                             local newResult = applyFilter(expressionName, filtering, expressionCurrentField, expressionOtherValues)
                             applyCondition(expressionCondition, newResult);
                         end
-                        else
+                    else
                         applyCondition(condition, false)
                     end
                 else
