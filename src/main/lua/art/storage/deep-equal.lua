@@ -1,4 +1,4 @@
-local function deepEqual(first, second)
+return function(first, second)
     if first == second then
         return true
     end
@@ -33,5 +33,3 @@ local function deepEqual(first, second)
 
     return false
 end
-
-return deepEqual
