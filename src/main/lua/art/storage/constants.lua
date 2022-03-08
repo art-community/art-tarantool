@@ -20,7 +20,12 @@ local stream = {
         filterBySpace = 1,
         filterByIndex = 2,
         filterByField = 3,
-        filterByFunction = 4
+        filterByFunction = 4,
+        nestedFilter = 5
+    },
+    filterExpressions = {
+        filterExpressionField = 1,
+        filterExpressionValue = 1,
     },
     mappingModes = {
         mapBySpace = 1,
