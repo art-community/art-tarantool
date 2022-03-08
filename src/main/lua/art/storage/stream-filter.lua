@@ -60,13 +60,13 @@ filters[constants.filters.filterContains] = function(filtering, field, request)
     return string.find(filtering[field], request[1])
 end
 
-local applyFilter = function(name, filtering, field, request)
-    return filters[name](filtering, field, request)
+local applyFilter = function(id, filtering, field, request)
+    return filters[id](filtering, field, request)
 end
 
-local selector = function(name, field, request)
+local selector = function(id, field, request)
     return function(filtering)
-        return applyFilter(name, filtering, field, request)
+        return applyFilter(id, filtering, field, request)
     end
 end
 
@@ -123,9 +123,9 @@ processFilters = function(filtering, inputFilters)
         if mode == constants.filterModes.filterByField then
             local parameters = filter[3]
             local field = parameters[1]
-            local name = parameters[2]
+            local id = parameters[2]
             local values = parameters[3]
-            result = applyCondition(condition, result, applyFilter(name, filtering, field, values));
+            result = applyCondition(condition, result, applyFilter(id, filtering, field, values));
         end
 
         if mode == constants.filterModes.filterByFunction then

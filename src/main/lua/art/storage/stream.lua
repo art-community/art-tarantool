@@ -13,9 +13,9 @@ comparators[constants.comparators.comparatorLess] = function(first, second, fiel
     return first[field] < second[field]
 end
 
-local comparatorSelector = function(name, field)
+local comparatorSelector = function(id, field)
     return function(first, second)
-        return comparators[name](first, second, field)
+        return comparators[id](first, second, field)
     end
 end
 
