@@ -25,7 +25,7 @@ local stream = {
     },
     filterExpressions = {
         filterExpressionField = 1,
-        filterExpressionValue = 1,
+        filterExpressionValue = 2,
     },
     mappingModes = {
         mapBySpace = 1,
