@@ -20,6 +20,14 @@ filters[constants.filters.filterLess] = function(filtering, field, request)
     return filtering[field] < request[1]
 end
 
+filters[constants.filters.filterMoreEquals] = function(filtering, field, request)
+    return filtering[field] >= request[1]
+end
+
+filters[constants.filters.filterLessEquals] = function(filtering, field, request)
+    return filtering[field] <= request[1]
+end
+
 filters[constants.filters.filterBetween] = function(filtering, field, request)
     return (filtering[field] >= request[1]) and (filtering[field] <= request[2])
 end
