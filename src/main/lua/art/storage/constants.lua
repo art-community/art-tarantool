@@ -40,18 +40,18 @@ local stream = {
         comparatorLess = 2,
     },
     processingFunctions = {
-        limit = 1,
-        offset = 2,
-        filter = 3,
-        sort = 4,
-        distinct = 5,
-        map = 6
+        processingLimit = 1,
+        processingOffset = 2,
+        processingFilter = 3,
+        processingSort = 4,
+        processingDistinct = 5,
+        processingMap = 6
     },
     terminatingFunctions = {
-        collect = 1,
-        count = 2,
-        all = 3,
-        any = 4
+        terminatingCollect = 1,
+        terminatingCount = 2,
+        terminatingAll = 3,
+        terminatingAny = 4
     }
 }
 return {

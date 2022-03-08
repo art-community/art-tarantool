@@ -21,7 +21,7 @@ end
 
 local terminatingFunctors = {}
 
-terminatingFunctors[constants.terminatingFunctions.collect] = function(generator, parameter, state)
+terminatingFunctors[constants.terminatingFunctions.terminatingCollect] = function(generator, parameter, state)
     local results = {}
     for _, item in functional.iter(generator, parameter, state) do
         table.insert(results, item)
@@ -29,31 +29,31 @@ terminatingFunctors[constants.terminatingFunctions.collect] = function(generator
     return results
 end
 
-local collect = terminatingFunctors[constants.terminatingFunctions.collect]
+local collect = terminatingFunctors[constants.terminatingFunctions.terminatingCollect]
 
 terminatingFunctors[constants.terminatingFunctions.count] = function(generator, parameter, state)
     return functional.length(generator, parameter, state)
 end
 
-terminatingFunctors[constants.terminatingFunctions.all] = function(generator, parameter, state, request)
+terminatingFunctors[constants.terminatingFunctions.terminatingAll] = function(generator, parameter, state, request)
     return functional.all(streamFilter.selector(unpack(request)), generator, parameter, state)
 end
 
-terminatingFunctors[constants.terminatingFunctions.any] = function(generator, parameter, state, request)
+terminatingFunctors[constants.terminatingFunctions.terminatingAny] = function(generator, parameter, state, request)
     return functional.any(streamFilter.selector(unpack(request)), generator, parameter, state)
 end
 
 local processingFunctors = {}
 
-processingFunctors[constants.processingFunctions.limit] = function(generator, parameter, state, count)
+processingFunctors[constants.processingFunctions.processingLimit] = function(generator, parameter, state, count)
     return functional.take_n(count, generator, parameter, state)
 end
 
-processingFunctors[constants.processingFunctions.offset] = function(generator, parameter, state, count)
+processingFunctors[constants.processingFunctions.processingOffset] = function(generator, parameter, state, count)
     return functional.drop_n(count, generator, parameter, state)
 end
 
-processingFunctors[constants.processingFunctions.distinct] = function(generator, parameter, state, field)
+processingFunctors[constants.processingFunctions.processingDistinct] = function(generator, parameter, state, field)
     local result = {}
     for _, item in functional.iter(generator, parameter, state) do
         result[item[field]] = item
@@ -61,15 +61,15 @@ processingFunctors[constants.processingFunctions.distinct] = function(generator,
     return pairs(result)
 end
 
-processingFunctors[constants.processingFunctions.sort] = function(generator, parameter, state, request)
+processingFunctors[constants.processingFunctions.processingSort] = function(generator, parameter, state, request)
     local values = collect(generator, parameter, state)
     table.sort(values, comparatorSelector(unpack(request)))
     return functional.iter(values)
 end
 
-processingFunctors[constants.processingFunctions.filter] = streamFilter.functor
+processingFunctors[constants.processingFunctions.processingFilter] = streamFilter.functor
 
-processingFunctors[constants.processingFunctions.map] = streamMapper
+processingFunctors[constants.processingFunctions.processingMap] = streamMapper
 
 return {
     processingFunctor = function(stream)
