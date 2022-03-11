@@ -56,5 +56,7 @@ local stream = {
     }
 }
 return {
-    stream = stream
+    stream = stream,
+
+    table = "table"
 }
