@@ -156,10 +156,10 @@ processFilters = function(filtering, inputFilters)
         if mode == constants.filterModes.filterByIndex then
             local parameters = filter[3]
             local otherSpace = parameters[1]
-            local currentFields = parameters[2]
+            local filteringFields = parameters[2]
             local otherIndex = parameters[3]
             local indexKeys = {}
-            for _, keyField in pairs(currentFields) do
+            for _, keyField in pairs(filteringFields) do
                 table.insert(indexKeys, filtering[keyField])
             end
             if next(indexKeys) ~= nil then
