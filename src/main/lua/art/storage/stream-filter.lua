@@ -72,12 +72,6 @@ local applyFilter = function(id, filtering, field, request)
     return filters[id](filtering, field, request)
 end
 
-local selector = function(id, field, request)
-    return function(filtering)
-        return applyFilter(id, filtering, field, request)
-    end
-end
-
 local applyCondition = function(condition, currentResult, newResult)
     if condition == constants.conditions.conditionAnd then
         return currentResult and newResult
@@ -177,15 +171,18 @@ processFilters = function(filtering, inputFilters)
     return result
 end
 
-local filter = function(generator, parameter, state, request)
-    local filteringFunction = function(filtering)
+local functor = function(request)
+    return function(filtering)
         return processFilters(filtering, request)
     end
-    return functional.filter(filteringFunction, generator, parameter, state)
+end
+
+local filter = function(generator, parameter, state, request)
+    return functional.filter(functor(request), generator, parameter, state)
 end
 
 return {
-    selector = selector,
+    functor = functor,
 
-    functor = filter
+    filter = filter
 }

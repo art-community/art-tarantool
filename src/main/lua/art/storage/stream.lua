@@ -36,15 +36,15 @@ terminatingFunctors[constants.terminatingFunctions.terminatingCount] = function(
 end
 
 terminatingFunctors[constants.terminatingFunctions.terminatingAll] = function(generator, parameter, state, request)
-    return functional.all(streamFilter.selector(unpack(request)), generator, parameter, state)
+    return functional.all(streamFilter.functor(unpack(request)), generator, parameter, state)
 end
 
 terminatingFunctors[constants.terminatingFunctions.terminatingAny] = function(generator, parameter, state, request)
-    return functional.any(streamFilter.selector(unpack(request)), generator, parameter, state)
+    return functional.any(streamFilter.functor(unpack(request)), generator, parameter, state)
 end
 
 terminatingFunctors[constants.terminatingFunctions.terminatingNone] = function(generator, parameter, state, request)
-    return not functional.any(streamFilter.selector(unpack(request)), generator, parameter, state)
+    return not functional.any(streamFilter.functor(unpack(request)), generator, parameter, state)
 end
 
 local processingFunctors = {}
@@ -71,7 +71,7 @@ processingFunctors[constants.processingFunctions.processingSort] = function(gene
     return functional.iter(values)
 end
 
-processingFunctors[constants.processingFunctions.processingFilter] = streamFilter.functor
+processingFunctors[constants.processingFunctions.processingFilter] = streamFilter.filter
 
 processingFunctors[constants.processingFunctions.processingMap] = streamMapper
 
