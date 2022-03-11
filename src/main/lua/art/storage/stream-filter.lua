@@ -132,7 +132,7 @@ processFilters = function(filtering, inputFilters)
 
         if mode == constants.filterModes.filterByFunction then
             local functionName = filter[3]
-            result = applyCondition(condition, result, box.func[functionName]:call(filtering));
+            result = applyCondition(condition, result, box.func[functionName]:call({filtering}));
         end
 
         if mode == constants.filterModes.filterBySpace then

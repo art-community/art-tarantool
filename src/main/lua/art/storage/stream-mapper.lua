@@ -7,7 +7,7 @@ return function(generator, parameter, state, request)
 
         if mode == constants.mappingModes.mapByFunction then
             local functionName = request[2]
-            return box.func[functionName]:call(mapping)
+            return box.func[functionName]:call({mapping})
         end
 
         if mode == constants.mappingModes.mapByField then
