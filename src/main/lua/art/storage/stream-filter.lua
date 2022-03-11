@@ -80,11 +80,11 @@ end
 
 local applyCondition = function(condition, currentResult, newResult)
     if condition == constants.conditions.conditionAnd then
-        return currentResult & newResult
+        return currentResult and newResult
     end
 
     if condition == constants.conditions.conditionOr then
-        return currentResult | newResult
+        return currentResult or newResult
     end
 end
 
