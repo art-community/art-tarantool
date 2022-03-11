@@ -31,7 +31,7 @@ end
 
 local collect = terminatingFunctors[constants.terminatingFunctions.terminatingCollect]
 
-terminatingFunctors[constants.terminatingFunctions.count] = function(generator, parameter, state)
+terminatingFunctors[constants.terminatingFunctions.terminatingCount] = function(generator, parameter, state)
     return functional.length(generator, parameter, state)
 end
 
