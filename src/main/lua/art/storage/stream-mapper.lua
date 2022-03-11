@@ -16,15 +16,15 @@ return function(generator, parameter, state, request)
         end
 
         if mode == constants.mappingModes.mapBySpace then
-            local otherSpace = request[3]
-            local currentField = request[4]
+            local otherSpace = request[2]
+            local currentField = request[3]
             return box.space[otherSpace]:get(mapping[currentField])
         end
 
         if mode == constants.mappingModes.mapByIndex then
-            local otherSpace = request[3]
-            local currentFields = request[4]
-            local otherIndex = request[5]
+            local otherSpace = request[2]
+            local currentFields = request[3]
+            local otherIndex = request[4]
             local indexKeys = {}
             for _, keyField in pairs(currentFields) do
                 table.insert(indexKeys, mapping[keyField])
