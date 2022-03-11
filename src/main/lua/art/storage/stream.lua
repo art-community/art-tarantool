@@ -43,6 +43,10 @@ terminatingFunctors[constants.terminatingFunctions.terminatingAny] = function(ge
     return functional.any(streamFilter.selector(unpack(request)), generator, parameter, state)
 end
 
+terminatingFunctors[constants.terminatingFunctions.terminatingNone] = function(generator, parameter, state, request)
+    return not functional.any(streamFilter.selector(unpack(request)), generator, parameter, state)
+end
+
 local processingFunctors = {}
 
 processingFunctors[constants.processingFunctions.processingLimit] = function(generator, parameter, state, count)

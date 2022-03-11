@@ -51,7 +51,8 @@ local stream = {
         terminatingCollect = 1,
         terminatingCount = 2,
         terminatingAll = 3,
-        terminatingAny = 4
+        terminatingAny = 4,
+        terminatingNone = 5
     }
 }
 return {
