@@ -4,7 +4,7 @@ local index = {
         if foundIndex.unique and #keys == 1 then
             return foundIndex:get(keys)
         end
-        return foundIndex:select(keys, { limit = 1 })
+        return foundIndex:select(keys, { limit = 1 })[1]
     end,
 
     findAll = function(space, index, keys)
@@ -14,7 +14,7 @@ local index = {
             if foundIndex.unique and #key == 1 then
                 table.insert(result, foundIndex:get(key))
             end
-            local found = next(foundIndex:select(key, { limit = 1 }))
+            local found = foundIndex:select(key, { limit = 1 })[1]
             if found then
                 table.insert(result, found)
             end
