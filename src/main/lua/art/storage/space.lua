@@ -1,11 +1,15 @@
 stream = require("art.storage.stream")
 
 local space = {
-    findFirst = function(space, key)
+    first = function(space, key)
         return box.space[space]:get(key)
     end,
 
-    findAll = function(space, keys)
+    select = function(space, key)
+        return box.space[space]:select(key)
+    end,
+
+    find = function(space, keys)
         local result = {}
         for _, key in pairs(keys) do
             local value = box.space[space]:get(key)

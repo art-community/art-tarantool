@@ -1,5 +1,5 @@
 local index = {
-    findFirst = function(space, index, keys)
+    first = function(space, index, keys)
         local foundIndex = box.space[space].index[index]
         if foundIndex.unique and #keys == 1 then
             return foundIndex:get(keys)
@@ -7,7 +7,11 @@ local index = {
         return foundIndex:select(keys, { limit = 1 })[1]
     end,
 
-    findAll = function(space, index, keys)
+    select = function(space, index, keys)
+        return box.space[space].index[index]:select(keys)
+    end,
+
+    find = function(space, index, keys)
         local result = {}
         for _, key in pairs(keys) do
             local foundIndex = box.space[space].index[index]
