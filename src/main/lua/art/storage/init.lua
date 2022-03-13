@@ -27,18 +27,6 @@ local function initialize()
         for name in pairs(art.schema) do
             box.schema.func.create("art.schema." .. name, { if_not_exists = true })
         end
-        for name in pairs(art.space.single) do
-            box.schema.func.create("art.space.single." .. name, { if_not_exists = true })
-        end
-        for name in pairs(art.space.multiple) do
-            box.schema.func.create("art.space.multiple." .. name, { if_not_exists = true })
-        end
-        for name in pairs(art.index.single) do
-            box.schema.func.create("art.index.single." .. name, { if_not_exists = true })
-        end
-        for name in pairs(art.index.multiple) do
-            box.schema.func.create("art.index.multiple." .. name, { if_not_exists = true })
-        end
     end)
 end
 
