@@ -1,7 +1,7 @@
 local index = {
     first = function(space, index, keys)
         local foundIndex = box.space[space].index[index]
-        if foundIndex.unique and #keys == 1 then
+        if foundIndex.unique or #keys == 1 then
             return foundIndex:get(keys)
         end
         return foundIndex:select(keys, { limit = 1 })[1]
