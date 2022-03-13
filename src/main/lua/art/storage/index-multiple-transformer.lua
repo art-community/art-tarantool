@@ -31,7 +31,7 @@ local transformer = {
                     for _, element in foundIndex:pairs(key) do
                         local result
                         for _, commands in pairs(commandGroups) do
-                            result = box.space[space].index[index]:update(element[1], commands)
+                            result = box.space[space]:update(element[1], commands)
                         end
                         table.insert(results, result)
                     end
