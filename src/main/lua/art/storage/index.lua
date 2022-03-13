@@ -7,8 +7,11 @@ local index = {
         return foundIndex:select(keys, { limit = 1 })[1]
     end,
 
-    select = function(space, index, keys)
-        return box.space[space].index[index]:select(keys)
+    select = function(space, index, keys, options)
+        if options == nil then
+            return box.space[space].index[index]:select(keys)
+        end
+        return box.space[space].index[index]:select(keys, { offset = options[1], limit = options[2] })
     end,
 
     find = function(space, index, keys)
