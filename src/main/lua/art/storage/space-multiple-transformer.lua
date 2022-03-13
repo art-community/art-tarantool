@@ -29,11 +29,15 @@ local transformer = {
         end)
     end,
 
-    update = function(space, keys, commands)
+    update = function(space, keys, commandGroups)
         return box.atomic(function()
             local results = {}
             for _, key in pairs(keys) do
-                table.insert(results, box.space[space]:update(key, commands))
+                local result
+                for _, commands in pairs(commandGroups) do
+                    result = box.space[space]:update(key, commands)
+                end
+                table.insert(results, result)
             end
             return results
         end)

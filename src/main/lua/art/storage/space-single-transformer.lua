@@ -13,8 +13,14 @@ local transformer = {
 
     replace = put,
 
-    update = function(space, key, commands)
-        return box.space[space]:update(key, commands)
+    update = function(space, key, commandGroups)
+        return box.atomic(function()
+            local result
+            for _, commands in pairs(commandGroups) do
+                result = box.space[space]:update(key, commands)
+            end
+            return result
+        end)
     end
 }
 
