@@ -12,9 +12,10 @@ local space = {
     find = function(space, keys)
         local result = {}
         for _, key in pairs(keys) do
-            local value = box.space[space]:get(key)
-            if value ~= nil then
-                table.insert(result, value)
+            for _, selected in pairs(box.space[space]:select(key)) do
+                if selected ~= nil then
+                    table.insert(result, selected)
+                end
             end
         end
         return result

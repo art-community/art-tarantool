@@ -14,13 +14,9 @@ local index = {
     find = function(space, index, keys)
         local result = {}
         for _, key in pairs(keys) do
-            local foundIndex = box.space[space].index[index]
-            if foundIndex.unique and #key == 1 then
-                table.insert(result, foundIndex:get(key))
-            else
-                local found = foundIndex:select(key, { limit = 1 })[1]
-                if found then
-                    table.insert(result, found)
+            for _, selected in pairs(box.space[space].index[index]:select(key)) do
+                if selected ~= nil then
+                    table.insert(result, selected)
                 end
             end
         end
