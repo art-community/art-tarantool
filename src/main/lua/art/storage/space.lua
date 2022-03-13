@@ -34,8 +34,8 @@ local space = {
         return stream.terminatingFunctor(terminatingOperator[1])(generator, parameter, state, terminatingOperator[2])
     end,
 
-    count = function(space)
-        return box.space[space]:count()
+    count = function(space, key)
+        return box.space[space]:count(key)
     end,
 
     truncate = function(space)
