@@ -4,7 +4,7 @@ local transformer = {
     end,
 
     update = function(space, index, key, commands)
-        return box.space[space].index[index]:update(space, key, commands)
+        return box.space[space].index[index]:update(key, commands)
     end,
 }
 

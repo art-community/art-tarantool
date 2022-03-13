@@ -14,7 +14,7 @@ local transformer = {
     replace = put,
 
     update = function(space, key, commands)
-        return box.space[space]:update(space, key, commands)
+        return box.space[space]:update(key, commands)
     end
 }
 
