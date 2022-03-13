@@ -26,8 +26,8 @@ local index = {
         return result
     end,
 
-    stream = function(space, index, processingOperators, terminatingOperator)
-        local generator, param, state = box.space[space].index[index]:pairs()
+    stream = function(space, index, processingOperators, terminatingOperator, baseKey)
+        local generator, param, state = box.space[space].index[index]:pairs(baseKey)
 
         for _, operator in pairs(processingOperators) do
             local name = operator[1]
