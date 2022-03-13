@@ -157,7 +157,7 @@ processFilters = function(filtering, inputFilters)
                 table.insert(indexKeys, filtering[keyField])
             end
             if next(indexKeys) ~= nil then
-                local mapped = box.space[otherSpace]:index(otherIndex):get(indexKeys)
+                local mapped = box.space[otherSpace].index[otherIndex]:get(indexKeys)
                 if mapped ~= nil then
                     result = processExpressions(filter[4], filtering, mapped, result)
                 else
