@@ -1,5 +1,6 @@
 local constants = require("art.storage.constants").stream
 local functional = require('fun')
+local storageIndex = require('art.storage.index')
 
 return function(generator, parameter, state, request)
     local mappingFunction = function(mapping)
@@ -32,7 +33,7 @@ return function(generator, parameter, state, request)
             if next(indexKeys) == nil then
                 return nil
             end
-            return box.space[otherSpace].index[otherIndex]:get(indexKeys)
+            return storageIndex.first(otherSpace, otherIndex, indexKeys)
         end
     end
 
