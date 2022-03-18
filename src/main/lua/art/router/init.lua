@@ -1,7 +1,7 @@
 local function initialize()
     box.once("art:main", function()
-        box.schema.func.create("art.router.immutable.call", { if_not_exists = true })
-        box.schema.func.create("art.router.mutable.call", { if_not_exists = true })
+        box.schema.func.create("art.immutable.call", { if_not_exists = true })
+        box.schema.func.create("art.mutable.call", { if_not_exists = true })
     end)
 end
 
