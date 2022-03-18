@@ -1,14 +1,16 @@
+local function initialize()
+    box.once("art:main", function()
+        box.schema.func.create("art.router.immutable.call", { if_not_exists = true })
+        box.schema.func.create("art.router.mutable.call", { if_not_exists = true })
+    end)
+end
+
 art = {
-    core = require('art.core'),
+    immutable = require("art.router.immutable"),
 
-    config = require('art.router.config'),
+    mutable = require("art.router.mutable"),
 
-    cluster = require('art.router.cluster'),
-
-    transaction = require('art.router.transaction'),
-
-    api = require('art.router.api')
+    initialize = initialize
 }
 
-art.cluster.mapping.init()
 return art
