@@ -9,7 +9,7 @@ local call = function(bucket, request)
     end
 
     local bucketId = vshard.router.bucket_id_mpcrc32(data)
-    return vshard.router.callrw(bucketId, request[1], request[2])
+    return vshard.router.callro(bucketId, request[1], request[2])
 end
 
 return {
