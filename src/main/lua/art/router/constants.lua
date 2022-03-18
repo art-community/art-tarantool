@@ -20,6 +20,18 @@ local storageFunctions = {
         put = "art.storage.space.single.put",
         update = "art.storage.space.single.update",
         upsert = "art.storage.space.single.upsert"
+    },
+    indexFirst = "art.storage.index.first",
+    indexSelect = "art.storage.index.select",
+    indexFind = "art.storage.index.find",
+    indexCount = "art.storage.index.count",
+    indexMultiple = {
+        delete = "art.storage.index.multiple.delete",
+        update = "art.storage.index.multiple.update",
+    },
+    indexSingle = {
+        delete = "art.storage.index.single.delete",
+        update = "art.storage.index.single.update",
     }
 }
 

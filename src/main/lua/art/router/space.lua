@@ -1,11 +1,11 @@
 local stream = require("art.router.stream")
 local generateBucket = require("art.router.bucket-generator")
-local spaceFunctions = require("art.router.constants").storageFunctions
+local storageFunctions = require("art.router.constants").storageFunctions
 local bucketModifier = require("art.router.bucket-id-modifier")
 
 local space = {
     first = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), spaceFunctions.spaceFirst, functionRequest)
+        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFirst, functionRequest)
         if error then
             return error
         end
@@ -13,7 +13,7 @@ local space = {
     end,
 
     select = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), spaceFunctions.spaceSelect, functionRequest)
+        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceSelect, functionRequest)
         if error then
             return error
         end
@@ -21,18 +21,19 @@ local space = {
     end,
 
     find = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), spaceFunctions.spaceFind, functionRequest)
+        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFind, functionRequest)
         if error then
             return error
         end
         return bucketModifier.removeMultipleBucketIds(result)
     end,
 
-    stream = function(space, processingOperators, terminatingOperator, baseKey)
+    stream = function(bucketRequest, functionRequest)
+
     end,
 
     count = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), spaceFunctions.spaceCount, functionRequest)
+        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
         if error then
             return error
         end
@@ -40,7 +41,7 @@ local space = {
     end,
 
     truncate = function(bucketRequest, functionRequest)
-        local _, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceFunctions.spaceTruncate, functionRequest)
+        local _, error = vshard.rouder.callrw(generateBucket(bucketRequest), storageFunctions.spaceTruncate, functionRequest)
         if error then
             return error
         end
