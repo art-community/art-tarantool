@@ -1,4 +1,4 @@
-stream = require("art.storage.stream")
+local stream = require("art.storage.stream")
 
 local space = {
     first = function(space, key)

@@ -42,8 +42,6 @@ local transformer = {
             return results
         end)
     end,
-
-    replace = put
 }
 
 return transformer

@@ -1,17 +1,17 @@
 local transformer = {
-    delete = function(space, key)
+    delete = function(bucketRequest, functionRequest)
         return box.space[space]:delete(key)
     end,
 
-    insert = function(space, data)
+    insert = function(bucketRequest, functionRequest)
         return box.space[space]:insert(data)
     end,
 
-    put = function(space, data)
+    put = function(bucketRequest, functionRequest)
         return box.space[space]:put(data)
     end,
 
-    update = function(space, key, commandGroups)
+    update = function(bucketRequest, functionRequest)
         return box.atomic(function()
             local result
             for _, commands in pairs(commandGroups) do
@@ -21,7 +21,7 @@ local transformer = {
         end)
     end,
 
-    upsert = function(space, data, commandGroups)
+    upsert = function(bucketRequest, functionRequest)
         return box.atomic(function()
             local result
             for _, commands in pairs(commandGroups) do
