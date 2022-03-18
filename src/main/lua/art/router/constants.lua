@@ -13,6 +13,13 @@ local storageFunctions = {
         insert = "art.storage.space.multiple.insert",
         put = "art.storage.space.multiple.put",
         update = "art.storage.space.multiple.update",
+    },
+    spaceSingle = {
+        delete = "art.storage.space.single.delete",
+        insert = "art.storage.space.single.insert",
+        put = "art.storage.space.single.put",
+        update = "art.storage.space.single.update",
+        upsert = "art.storage.space.single.upsert"
     }
 }
 
