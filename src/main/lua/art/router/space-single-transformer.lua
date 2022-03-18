@@ -27,7 +27,7 @@ local transformer = {
         local bucket = generateBucket(bucketRequest)
         bucketModifier.insertSingleBucketId(functionRequest[1], bucket)
 
-        local result, error = vshard.rouder.callrw(bucket, spaceSingle.insert, functionRequest)
+        local result, error = vshard.rouder.callrw(bucket, spaceSingle.put, functionRequest)
         if error then
             return error
         end
