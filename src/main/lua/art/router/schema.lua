@@ -4,6 +4,13 @@ local shards = require("art.router.shard-service")
 
 local schema = {
     createIndex = function(request)
+        local options = request[3]
+        local parts = options["parts"]
+        for _, part in pairs(parts) do
+            if part["field"] >= configuration.bucketIdField then
+                part["field"] = part["field"] + 1
+            end
+        end
         shards.forEach(function(shard)
             shard:callrw(storageFunctions.schemaCreateIndex, request)
         end)
@@ -37,12 +44,6 @@ local schema = {
         table.insert(request, configuration.bucketIdField)
         shards.forEach(function(shard)
             shard:callrw(storageFunctions.schemaCreateShardSpace, request)
-        end)
-    end,
-
-    createStorageSpace = function(request)
-        shards.forEach(function(shard)
-            shard:callrw(storageFunctions.schemaCreateStorageSpace, request)
         end)
     end,
 
