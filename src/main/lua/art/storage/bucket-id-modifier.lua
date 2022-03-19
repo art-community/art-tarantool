@@ -1,7 +1,7 @@
-local configuration = require("art.router.configuration").configuration
+local shard = require("art.storage.configuration").configuration.shard
 
 local removeSingleBucketId = function(item)
-    table.remove(item, configuration.bucketIdField)
+    table.remove(item, shard.bucketIdField)
     return item
 end
 
@@ -13,7 +13,7 @@ local removeMultipleBucketIds = function(items)
 end
 
 local insertSingleBucketId = function(item, id)
-    table.insert(item, configuration.bucketIdField, id)
+    table.insert(item, shard.bucketIdField, id)
     return item
 end
 

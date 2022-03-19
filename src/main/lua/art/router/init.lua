@@ -1,4 +1,4 @@
-local configure = require("configuration").configure
+local configure = require("art.router.configuration").configure
 
 local function initialize(configuration)
     if configuration ~= nil then
