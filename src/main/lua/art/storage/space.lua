@@ -1,3 +1,5 @@
+local stream = require("art.storage.stream")
+
 local space = {
     first = function(space, key)
         return box.space[space]:get(key)
