@@ -2,6 +2,7 @@ local generateBucket = require("art.router.bucket-generator")
 local storageFunctions = require("art.router.constants").storageFunctions
 local bucketModifier = require("art.router.bucket-id-modifier")
 local throw = require("error-thrower")
+local spaceStream = require("art.router.stream").spaceStream
 
 local space = {
     first = function(bucketRequest, functionRequest)
@@ -28,9 +29,7 @@ local space = {
         return bucketModifier.removeMultipleBucketIds(result)
     end,
 
-    stream = function(bucketRequest, functionRequest)
-
-    end,
+    stream = spaceStream,
 
     count = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
