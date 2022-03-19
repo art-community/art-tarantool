@@ -1,5 +1,3 @@
-local stream = require("art.storage").stream
-
 local index = {
     first = function(space, index, keys)
         local foundIndex = box.space[space].index[index]
