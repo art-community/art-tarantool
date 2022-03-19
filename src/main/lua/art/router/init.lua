@@ -1,4 +1,10 @@
-local function initialize()
+local configure = require("configuration").configure
+
+local function initialize(configuration)
+    if configuration ~= nil then
+        configure(configuration)
+    end
+
     box.once("art:main", function()
         for name in pairs(art.space) do
             if name ~= "multiple" and name ~= "single" then

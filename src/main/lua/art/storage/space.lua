@@ -24,7 +24,11 @@ local space = {
         return result
     end,
 
-    stream = function(space, processingOperators, terminatingOperator, baseKey)
+    stream = function(space, operators, options)
+        local processingOperators = operators[1]
+        local terminatingOperator = operators[2]
+        local baseKey = options[1]
+
         local generator, parameter, state = box.space[space]:pairs(baseKey)
 
         for _, operator in pairs(processingOperators) do

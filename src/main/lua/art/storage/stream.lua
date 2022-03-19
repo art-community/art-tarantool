@@ -76,11 +76,11 @@ processingFunctors[constants.processingFunctions.processingFilter] = streamFilte
 processingFunctors[constants.processingFunctions.processingMap] = streamMapper
 
 return {
-    processingFunctor = function(stream)
-        return processingFunctors[stream]
+    processingFunctor = function(id)
+        return processingFunctors[id]
     end,
 
-    terminatingFunctor = function(stream)
-        return terminatingFunctors[stream]
+    terminatingFunctor = function(id)
+        return terminatingFunctors[id]
     end,
 }

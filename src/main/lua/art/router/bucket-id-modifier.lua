@@ -1,5 +1,7 @@
+local configuration = require("configuration").configuration
+
 local removeSingleBucketId = function(item)
-    table.remove(item, 2)
+    table.remove(item, configuration.bucketIdField)
     return item
 end
 
@@ -11,7 +13,7 @@ local removeMultipleBucketIds = function(items)
 end
 
 local insertSingleBucketId = function(item, id)
-    table.insert(item, 2, id)
+    table.insert(item, configuration.bucketIdField, id)
     return item
 end
 

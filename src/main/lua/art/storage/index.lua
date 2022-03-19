@@ -1,3 +1,5 @@
+local stream = require("art.storage.stream")
+
 local index = {
     first = function(space, index, keys)
         local foundIndex = box.space[space].index[index]
@@ -26,7 +28,11 @@ local index = {
         return result
     end,
 
-    stream = function(space, index, processingOperators, terminatingOperator, baseKey)
+    stream = function(space, index, operators, options)
+        local processingOperators = operators[1]
+        local terminatingOperators = operators[2]
+        local baseKey = options[1]
+
         local generator, param, state = box.space[space].index[index]:pairs(baseKey)
 
         for _, operator in pairs(processingOperators) do
@@ -35,7 +41,7 @@ local index = {
             generator, param, state = stream.processingFunctor(name)(generator, param, state, parameters)
         end
 
-        return stream.terminatingFunctor(terminatingOperator[1])(generator, param, state, terminatingOperator[2])
+        return stream.terminatingFunctor(terminatingOperators[1])(generator, param, state, terminatingOperators[2])
     end,
 
     count = function(space, index, key)

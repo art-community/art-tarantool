@@ -8,6 +8,7 @@ local storageFunctions = {
     spaceFind = "art.storage.space.find",
     spaceCount = "art.storage.space.count",
     spaceTruncate = "art.storage.space.truncate",
+    spaceStream = "art.storage.space.stream",
     spaceMultiple = {
         delete = "art.storage.space.multiple.delete",
         insert = "art.storage.space.multiple.insert",
@@ -35,7 +36,18 @@ local storageFunctions = {
     }
 }
 
+local stream = {
+    terminatingFunctions = {
+        terminatingCollect = 1,
+        terminatingCount = 2,
+        terminatingAll = 3,
+        terminatingAny = 4,
+        terminatingNone = 5
+    }
+}
+
 return {
     algorithms = algorithms,
     storageFunctions = storageFunctions,
+    stream = stream,
 }
