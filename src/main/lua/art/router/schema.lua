@@ -33,14 +33,14 @@ local schema = {
         end)
     end,
 
-    createShardSpace = function(request, sharded)
+    createShardSpace = function(request)
         table.insert(request, configuration.bucketIdField)
         shards.forEach(function(shard)
             shard:callrw(storageFunctions.schemaCreateShardSpace, request)
         end)
     end,
 
-    createStorageSpace = function(request, sharded)
+    createStorageSpace = function(request)
         shards.forEach(function(shard)
             shard:callrw(storageFunctions.schemaCreateStorageSpace, request)
         end)
