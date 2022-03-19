@@ -7,7 +7,7 @@ local spaceStream = require("art.router.stream").spaceStream
 local space = {
     first = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFirst, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return bucketModifier.removeSingleBucketId(result)
@@ -15,7 +15,7 @@ local space = {
 
     select = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceSelect, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
@@ -23,7 +23,7 @@ local space = {
 
     find = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFind, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
@@ -33,7 +33,7 @@ local space = {
 
     count = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return result
@@ -41,7 +41,7 @@ local space = {
 
     truncate = function(bucketRequest, functionRequest)
         local _, error = vshard.rouder.callrw(generateBucket(bucketRequest), storageFunctions.spaceTruncate, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
     end,

@@ -6,7 +6,7 @@ local bucketModifier = require("art.router.bucket-id-modifier")
 local transformer = {
     delete = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceMultiple.delete, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
@@ -17,7 +17,7 @@ local transformer = {
         bucketModifier.insertMultipleBucketIds(functionRequest[1], bucket)
 
         local result, error = vshard.rouder.callrw(bucket, spaceMultiple.insert, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
 
@@ -29,7 +29,7 @@ local transformer = {
         bucketModifier.insertMultipleBucketIds(functionRequest[1], bucket)
 
         local result, error = vshard.rouder.callrw(bucket, spaceMultiple.put, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
 
@@ -38,7 +38,7 @@ local transformer = {
 
     update = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceMultiple.update, functionRequest)
-        if error then
+        if error ~= nil then
             throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)

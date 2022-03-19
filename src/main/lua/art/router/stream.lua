@@ -24,7 +24,7 @@ end
 
 local spaceStream = function(bucketRequest, functionRequest)
     local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceStream, functionRequest)
-    if error then
+    if error ~= nil then
         throw(error)
     end
 
@@ -37,7 +37,7 @@ end
 
 local indexStream = function(bucketRequest, functionRequest)
     local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexStream, functionRequest)
-    if error then
+    if error ~= nil then
         throw(error)
     end
 
