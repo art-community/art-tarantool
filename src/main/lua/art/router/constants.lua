@@ -25,6 +25,7 @@ local storageFunctions = {
     indexFirst = "art.storage.index.first",
     indexSelect = "art.storage.index.select",
     indexFind = "art.storage.index.find",
+    indexStream = "art.storage.index.stream",
     indexCount = "art.storage.index.count",
     indexMultiple = {
         delete = "art.storage.index.multiple.delete",
