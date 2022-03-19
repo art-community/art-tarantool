@@ -30,7 +30,7 @@ local schema = {
         box.schema.space.create(name, configuration)
     end,
 
-    createShardedSpace = function(name, configuration, bucketIdField)
+    createShardSpace = function(name, configuration, bucketIdField)
         if not configuration then
             configuration = {}
         end

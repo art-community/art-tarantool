@@ -37,7 +37,7 @@ local schema = {
         if (sharded) then
             table.insert(request, configuration.bucketIdField)
             shards.forEach(function(shard)
-                shard:callrw(storageFunctions.schemaCreateShardedSpace, request)
+                shard:callrw(storageFunctions.schemaCreateShardSpace, request)
             end)
             return
         end

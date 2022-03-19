@@ -37,7 +37,7 @@ local storageFunctions = {
     },
     schemaCreateIndex = "art.schema.createIndex",
     schemaCreateStorageSpace = "art.schema.createStorageSpace",
-    schemaCreateShardedSpace = "art.schema.createShardedSpace",
+    schemaCreateShardSpace = "art.schema.createShardSpace",
     schemaSpaces = "art.schema.spaces",
     schemaDropIndex = "art.schema.dropIndex",
     schemaRenameSpace = "art.schema.renameSpace",
