@@ -1,5 +1,6 @@
 local throw = require("art.router.error-thrower")
 local storageFunctions = require("art.router.constants").storageFunctions
+local configuration = require("art.router.configuration").configuration
 
 local forEachShard = function(functor)
     local shards, error = vshard.router.routeall()
@@ -78,6 +79,7 @@ local schema = {
 
     createSpace = function(request, sharded)
         if (sharded) then
+            table.insert(request, configuration.bucketIdField)
             forEachShard(function(shard)
                 shard:callrw(storageFunctions.schemaCreateShardedSpace, request)
             end)
