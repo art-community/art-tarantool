@@ -1,3 +1,4 @@
+local throw = require("error-thrower")
 local generateBucket = require("art.router.bucket-generator")
 local storageFunctions = require("art.router.constants").storageFunctions
 local bucketModifier = require("art.router.bucket-id-modifier")
@@ -6,7 +7,7 @@ local index = {
     first = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexFirst, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeSingleBucketId(result)
     end,
@@ -14,7 +15,7 @@ local index = {
     select = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexSelect, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
     end,
@@ -22,7 +23,7 @@ local index = {
     find = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexFind, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
     end,
@@ -33,7 +34,7 @@ local index = {
     count = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexCount, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return result
     end,

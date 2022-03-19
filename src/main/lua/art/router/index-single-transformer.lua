@@ -1,3 +1,4 @@
+local throw = require("error-thrower")
 local generateBucket = require("art.router.bucket-generator")
 local indexSingle = require("art.router.constants").storageFunctions.indexSingle
 local bucketModifier = require("art.router.bucket-id-modifier")
@@ -6,7 +7,7 @@ local transformer = {
     delete = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), indexSingle.delete, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeSingleBucketId(result)
     end,
@@ -14,7 +15,7 @@ local transformer = {
     update = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceSingle.update, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeSingleBucketId(result)
     end,

@@ -2,12 +2,13 @@ local stream = require("art.router.stream")
 local generateBucket = require("art.router.bucket-generator")
 local storageFunctions = require("art.router.constants").storageFunctions
 local bucketModifier = require("art.router.bucket-id-modifier")
+local throw = require("error-thrower")
 
 local space = {
     first = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFirst, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeSingleBucketId(result)
     end,
@@ -15,7 +16,7 @@ local space = {
     select = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceSelect, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
     end,
@@ -23,7 +24,7 @@ local space = {
     find = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFind, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return bucketModifier.removeMultipleBucketIds(result)
     end,
@@ -35,7 +36,7 @@ local space = {
     count = function(bucketRequest, functionRequest)
         local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
         if error then
-            return error
+            throw(error)
         end
         return result
     end,
@@ -43,7 +44,7 @@ local space = {
     truncate = function(bucketRequest, functionRequest)
         local _, error = vshard.rouder.callrw(generateBucket(bucketRequest), storageFunctions.spaceTruncate, functionRequest)
         if error then
-            return error
+            throw(error)
         end
     end,
 
