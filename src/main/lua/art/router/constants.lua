@@ -43,7 +43,16 @@ local stream = {
         terminatingAll = 3,
         terminatingAny = 4,
         terminatingNone = 5
-    }
+    },
+    processingFunctions = {
+        processingMap = 6
+    },
+    mappingModes = {
+        mapBySpace = 1,
+        mapByIndex = 2,
+        mapByFunction = 3,
+        mapByField = 4
+    },
 }
 
 return {
