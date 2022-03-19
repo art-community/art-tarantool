@@ -1,4 +1,3 @@
-local stream = require("art.storage").stream
 
 local space = {
     first = function(space, key)
@@ -28,6 +27,7 @@ local space = {
         local processingOperators = operators[1]
         local terminatingOperator = operators[2]
         local baseKey = options[1]
+        local stream = require("art.storage.stream")
 
         local generator, parameter, state = box.space[space]:pairs(baseKey)
 
