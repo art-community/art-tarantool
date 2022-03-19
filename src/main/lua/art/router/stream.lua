@@ -2,7 +2,7 @@ local stream = require("art.router.constants").stream
 local generateBucket = require("art.router.bucket-generator")
 local storageFunctions = require("art.router.constants").storageFunctions
 local bucketModifier = require("art.router.bucket-id-modifier")
-local throw = require("error-thrower")
+local throw = require("art.router.error-thrower")
 
 local removeBucket = function(operators)
     local processingOperators = operators[1]

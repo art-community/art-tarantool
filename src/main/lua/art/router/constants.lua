@@ -34,7 +34,16 @@ local storageFunctions = {
     indexSingle = {
         delete = "art.storage.index.single.delete",
         update = "art.storage.index.single.update",
-    }
+    },
+    schemaCreateIndex = "art.schema.createIndex",
+    schemaCreateStorageSpace = "art.schema.createStorageSpace",
+    schemaCreateShardedSpace = "art.schema.createShardedSpace",
+    schemaSpaces = "art.schema.spaces",
+    schemaDropIndex = "art.schema.dropIndex",
+    schemaRenameSpace = "art.schema.renameSpace",
+    schemaDropSpace = "art.schema.dropSpace",
+    schemaIndices = "art.schema.indices",
+    schemaFormat = "art.schema.format"
 }
 
 local stream = {

@@ -1,4 +1,4 @@
-local throw = require("error-thrower")
+local throw = require("art.router.error-thrower")
 local generateBucket = require("art.router.bucket-generator")
 local spaceMultiple = require("art.router.constants").storageFunctions.spaceMultiple
 local bucketModifier = require("art.router.bucket-id-modifier")
