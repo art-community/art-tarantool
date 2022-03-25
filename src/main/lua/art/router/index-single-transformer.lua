@@ -13,7 +13,7 @@ local transformer = {
     end,
 
     update = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceSingle.update, functionRequest)
+        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), indexSingle.update, functionRequest)
         if error ~= nil then
             throw(error)
         end

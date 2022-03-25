@@ -14,7 +14,7 @@ local transformer = {
 
     insert = function(bucketRequest, functionRequest)
         local bucket = generateBucket(bucketRequest)
-        bucketModifier.insertMultipleBucketIds(functionRequest[1], bucket)
+        bucketModifier.insertMultipleBucketIds(functionRequest[2], bucket)
 
         local result, error = vshard.rouder.callrw(bucket, spaceMultiple.insert, functionRequest)
         if error ~= nil then
@@ -26,7 +26,7 @@ local transformer = {
 
     put = function(bucketRequest, functionRequest)
         local bucket = generateBucket(bucketRequest)
-        bucketModifier.insertMultipleBucketIds(functionRequest[1], bucket)
+        bucketModifier.insertMultipleBucketIds(functionRequest[2], bucket)
 
         local result, error = vshard.rouder.callrw(bucket, spaceMultiple.put, functionRequest)
         if error ~= nil then
