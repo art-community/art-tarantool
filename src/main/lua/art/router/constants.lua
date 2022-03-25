@@ -36,8 +36,7 @@ local storageFunctions = {
         update = "art.index.single.update",
     },
     schemaCreateIndex = "art.schema.createIndex",
-    schemaCreateStorageSpace = "art.schema.createStorageSpace",
-    schemaCreateShardSpace = "art.schema.createShardSpace",
+    schemaCreateSpace = "art.schema.createSpace",
     schemaSpaces = "art.schema.spaces",
     schemaDropIndex = "art.schema.dropIndex",
     schemaRenameSpace = "art.schema.renameSpace",
@@ -69,4 +68,5 @@ return {
     algorithms = algorithms,
     storageFunctions = storageFunctions,
     stream = stream,
+    notCreatedMessage = "not created",
 }

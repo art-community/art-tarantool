@@ -1,5 +1,7 @@
 local throw = require("art.router.error-thrower")
-local storageFunctions = require("art.router.constants").storageFunctions
+local constants = require("art.router.constants")
+local storageFunctions = constants.storageFunctions
+local notCreatedMessage = constants.notCreatedMessage
 local configuration = require("art.router.configuration").configuration
 local shards = require("art.router.shard-service")
 
@@ -14,7 +16,7 @@ local schema = {
         end
         shards.forEach(function(shard)
             local _, error = shard:callrw(storageFunctions.schemaCreateIndex, request)
-            if error ~= nil then
+            if error ~= nil and error ~= notCreatedMessage then
                 throw(error)
             end
         end)
@@ -56,11 +58,11 @@ local schema = {
         end)
     end,
 
-    createShardSpace = function(request)
+    createSpace = function(request)
         table.insert(request, configuration.bucketIdField)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaCreateShardSpace, request)
-            if error ~= nil then
+            local _, error = shard:callrw(storageFunctions.schemaCreateSpace, request)
+            if error ~= nil and error ~= notCreatedMessage then
                 throw(error)
             end
         end)

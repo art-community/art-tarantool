@@ -23,23 +23,11 @@ local schema = {
         box.space[space]:drop()
     end,
 
-    createStorageSpace = function(name, configuration)
+    createSpace = function(name, configuration)
         if not configuration then
             configuration = {}
         end
         box.schema.space.create(name, configuration)
-    end,
-
-    createShardSpace = function(name, configuration, bucketIdField)
-        if not configuration then
-            configuration = {}
-        end
-        box.schema.space.create(name, configuration):create_index(vshard.storage.internal.shard_index, {
-            parts = { { field = bucketIdField, type = 'unsigned' } },
-            id = 1,
-            unique = true,
-            if_not_exists = true
-        })
     end,
 
     spaces = function()
