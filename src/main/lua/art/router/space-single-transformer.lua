@@ -5,7 +5,7 @@ local bucketModifier = require("art.router.bucket-id-modifier")
 
 local transformer = {
     delete = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceSingle.delete, functionRequest)
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), spaceSingle.delete, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -16,7 +16,7 @@ local transformer = {
         local bucket = generateBucket(bucketRequest)
         bucketModifier.insertSingleBucketId(functionRequest[2], bucket)
 
-        local result, error = vshard.rouder.callrw(bucket, spaceSingle.insert, functionRequest)
+        local result, error = vshard.router.callrw(bucket, spaceSingle.insert, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -28,7 +28,7 @@ local transformer = {
         local bucket = generateBucket(bucketRequest)
         bucketModifier.insertSingleBucketId(functionRequest[2], bucket)
 
-        local result, error = vshard.rouder.callrw(bucket, spaceSingle.put, functionRequest)
+        local result, error = vshard.router.callrw(bucket, spaceSingle.put, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -37,7 +37,7 @@ local transformer = {
     end,
 
     update = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), spaceSingle.update, functionRequest)
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), spaceSingle.update, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -48,7 +48,7 @@ local transformer = {
         local bucket = generateBucket(bucketRequest)
         bucketModifier.insertSingleBucketId(functionRequest[2], bucket)
 
-        local result, error = vshard.rouder.callrw(bucket, spaceSingle.upsert, functionRequest)
+        local result, error = vshard.router.callrw(bucket, spaceSingle.upsert, functionRequest)
         if error ~= nil then
             throw(error)
         end

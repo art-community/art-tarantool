@@ -6,7 +6,7 @@ local spaceStream = require("art.router.stream").spaceStream
 
 local space = {
     first = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFirst, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.spaceFirst, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -14,7 +14,7 @@ local space = {
     end,
 
     select = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceSelect, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.spaceSelect, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -22,7 +22,7 @@ local space = {
     end,
 
     find = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceFind, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.spaceFind, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -32,7 +32,7 @@ local space = {
     stream = spaceStream,
 
     count = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.spaceCount, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -40,7 +40,7 @@ local space = {
     end,
 
     truncate = function(bucketRequest, functionRequest)
-        local _, error = vshard.rouder.callrw(generateBucket(bucketRequest), storageFunctions.spaceTruncate, functionRequest)
+        local _, error = vshard.router.callrw(generateBucket(bucketRequest), storageFunctions.spaceTruncate, functionRequest)
         if error ~= nil then
             throw(error)
         end

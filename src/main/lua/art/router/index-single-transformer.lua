@@ -5,7 +5,7 @@ local bucketModifier = require("art.router.bucket-id-modifier")
 
 local transformer = {
     delete = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), indexSingle.delete, functionRequest)
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.delete, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -13,7 +13,7 @@ local transformer = {
     end,
 
     update = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callrw(generateBucket(bucketRequest), indexSingle.update, functionRequest)
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.update, functionRequest)
         if error ~= nil then
             throw(error)
         end

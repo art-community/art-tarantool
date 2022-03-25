@@ -23,7 +23,7 @@ local removeBucket = function(operators)
 end
 
 local spaceStream = function(bucketRequest, functionRequest)
-    local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.spaceStream, functionRequest)
+    local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.spaceStream, functionRequest)
     if error ~= nil then
         throw(error)
     end
@@ -36,7 +36,7 @@ local spaceStream = function(bucketRequest, functionRequest)
 end
 
 local indexStream = function(bucketRequest, functionRequest)
-    local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexStream, functionRequest)
+    local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexStream, functionRequest)
     if error ~= nil then
         throw(error)
     end

@@ -6,7 +6,7 @@ local indexStream = require("art.router.stream").indexStream
 
 local index = {
     first = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexFirst, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFirst, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -14,7 +14,7 @@ local index = {
     end,
 
     select = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexSelect, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexSelect, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -22,7 +22,7 @@ local index = {
     end,
 
     find = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexFind, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFind, functionRequest)
         if error ~= nil then
             throw(error)
         end
@@ -32,7 +32,7 @@ local index = {
     stream = indexStream,
 
     count = function(bucketRequest, functionRequest)
-        local result, error = vshard.rouder.callro(generateBucket(bucketRequest), storageFunctions.indexCount, functionRequest)
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexCount, functionRequest)
         if error ~= nil then
             throw(error)
         end
