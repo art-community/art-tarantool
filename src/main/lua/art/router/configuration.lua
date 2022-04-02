@@ -4,8 +4,12 @@ local configuration = {
 }
 
 local configure = function(newConfiguration)
-    configuration.bucketIdField = newConfiguration.bucketIdField
-    configuration.callTimeout = newConfiguration.callTimeout
+    if newConfiguration.bucketIdField ~= nil then
+        configuration.bucketIdField = newConfiguration.bucketIdField
+    end
+    if newConfiguration.callTimeout ~= nil then
+        configuration.callTimeout = newConfiguration.callTimeout
+    end
 end
 
 return {

@@ -7,7 +7,7 @@ local configuration = require("art.router.configuration").configuration
 
 local index = {
     first = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFirst, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFirst, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end
@@ -15,7 +15,7 @@ local index = {
     end,
 
     select = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexSelect, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexSelect, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end
@@ -23,7 +23,7 @@ local index = {
     end,
 
     find = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFind, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexFind, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end
@@ -33,7 +33,7 @@ local index = {
     stream = indexStream,
 
     count = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexCount, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callro(generateBucket(bucketRequest), storageFunctions.indexCount, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end

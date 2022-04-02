@@ -6,7 +6,7 @@ local configuration = require("art.router.configuration").configuration
 
 local transformer = {
     delete = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.delete, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.delete, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end
@@ -14,7 +14,7 @@ local transformer = {
     end,
 
     update = function(bucketRequest, functionRequest)
-        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.update, functionRequest, { timeout = configuration.timeout })
+        local result, error = vshard.router.callrw(generateBucket(bucketRequest), indexSingle.update, functionRequest, { timeout = configuration.callTimeout })
         if error ~= nil then
             throw(error)
         end

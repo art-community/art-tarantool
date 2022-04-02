@@ -4,7 +4,6 @@ local storageFunctions = constants.storageFunctions
 local notCreatedMessage = constants.notCreatedMessage
 local configuration = require("art.router.configuration").configuration
 local shards = require("art.router.shard-service")
-local configuration = require("art.router.configuration").configuration
 
 local schema = {
     createIndex = function(request)
@@ -16,7 +15,7 @@ local schema = {
             end
         end
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaCreateIndex, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaCreateIndex, request, { timeout = configuration.callTimeout })
             if error ~= nil and error ~= notCreatedMessage then
                 throw(error)
             end
@@ -25,7 +24,7 @@ local schema = {
 
     dropIndex = function(request)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaDropIndex, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaDropIndex, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
@@ -34,7 +33,7 @@ local schema = {
 
     renameSpace = function(request)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaRenameSpace, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaRenameSpace, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
@@ -43,7 +42,7 @@ local schema = {
 
     formatSpace = function(request)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaFormat, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaFormat, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
@@ -52,7 +51,7 @@ local schema = {
 
     dropSpace = function(request)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaDropIndex, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaDropIndex, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
@@ -62,7 +61,7 @@ local schema = {
     createSpace = function(request)
         table.insert(request, configuration.bucketIdField)
         shards.forEach(function(shard)
-            local _, error = shard:callrw(storageFunctions.schemaCreateSpace, request, { timeout = configuration.timeout })
+            local _, error = shard:callrw(storageFunctions.schemaCreateSpace, request, { timeout = configuration.callTimeout })
             if error ~= nil and error ~= notCreatedMessage then
                 throw(error)
             end
@@ -71,7 +70,7 @@ local schema = {
 
     spaces = function(request)
         return shards.flatMap(function(shard)
-            local _, error = shard:callro(storageFunctions.schemaSpaces, request, { timeout = configuration.timeout })
+            local _, error = shard:callro(storageFunctions.schemaSpaces, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
@@ -80,7 +79,7 @@ local schema = {
 
     indices = function(request)
         return shards.flatMap(function(shard)
-            local _, error = shard:callro(storageFunctions.schemaIndices, request, { timeout = configuration.timeout })
+            local _, error = shard:callro(storageFunctions.schemaIndices, request, { timeout = configuration.callTimeout })
             if error ~= nil then
                 throw(error)
             end
