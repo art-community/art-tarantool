@@ -6,12 +6,16 @@ jobs:
       matrix:
         os: [ ubuntu-latest ]
         lua: [ 5.1.5 ]
+        jdk: [ 21 ]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2  
       - uses: leafo/gh-actions-lua@v8.0.0
         with:
           luaVersion: ${{ matrix.lua }}
+      - uses: actions/setup-java@v1
+        with:
+          java-version: ${{ matrix.jdk }}
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Build with Gradle
